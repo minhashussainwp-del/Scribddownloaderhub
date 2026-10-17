@@ -15,16 +15,20 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const parsedUrl = new URL(targetUrl);
+    const normalizedUrl = targetUrl.replace(
+      /^http:\/\/html\.scribd\.com\//i,
+      'https://html.scribdassets.com/'
+    );
+    const parsedUrl = new URL(normalizedUrl);
     const allowedHosts = ['scribd.com', 'scribdassets.com', 'wsrv.nl'];
     const isAllowed = allowedHosts.some((host) => parsedUrl.hostname.endsWith(host));
     if (!isAllowed) {
       return res.status(403).json({ error: 'Host not permitted by asset proxy' });
     }
 
-    const upstream = await fetch(targetUrl, {
-      headers: getRandomHeaders('https://www.scribd.com/'),
-      signal: AbortSignal.timeout(10000)
+    const upstream = await fetch(normalizedUrl, {
+      headers: getRandomHeaders(normalizedUrl),
+      signal: AbortSignal.timeout(12000)
     });
 
     if (!upstream.ok) {
@@ -33,10 +37,19 @@ export default async function handler(req: any, res: any) {
 
     const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
     const arrayBuffer = await upstream.arrayBuffer();
+    const buf = Buffer.from(arrayBuffer);
+
+    // Reject Fastly `<title>Client Challenge</title>` so client relays know immediately if challenged
+    if (contentType.includes('text/html') && buf.length < 6000) {
+      const sampleText = buf.toString('utf8');
+      if (sampleText.includes('<title>Client Challenge</title>') || sampleText.includes('/_fs-ch-')) {
+        return res.status(503).json({ error: 'Fastly Client Challenge encountered' });
+      }
+    }
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'public, max-age=86400');
-    return res.status(200).send(Buffer.from(arrayBuffer));
+    return res.status(200).send(buf);
   } catch (err: any) {
     return res.status(500).json({ error: err?.message || 'Proxy fetch failed' });
   }

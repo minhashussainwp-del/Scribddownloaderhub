@@ -221,7 +221,7 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
       heroTitle: 'Free Scribd PDF Downloader',
       heroSubtitle:
         'Paste any Scribd document URL below, click Fetch for instant full-page detection, and click Download PDF for high-speed parallel PDF download.',
-      inputPlaceholder: 'https://www.scribd.com/document/436350615/Sample-PDF-Document',
+      inputPlaceholder: 'https://www.scribd.com/document/991278283/2026-Grade-12-Investigation-Term-1',
       fetchBtn: 'Fetch',
       fetchingBtn: 'Fetching Pages...',
       downloadPdfBtn: 'Download PDF',
@@ -249,7 +249,7 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
       heroTitle: 'مفت Scribd PDF ڈاؤنلوڈر (Free Scribd Downloader)',
       heroSubtitle:
         'اپنا Scribd لنک نیچے پیسٹ کریں، تمام صفحات نمبر کے ساتھ لوڈ کرنے کے لیے Fetch پر کلک کریں، اور اوریجنل فائل کے لیے Download PDF دبائیں۔',
-      inputPlaceholder: 'https://www.scribd.com/document/436350615/Sample-PDF-Document',
+      inputPlaceholder: 'https://www.scribd.com/document/991278283/2026-Grade-12-Investigation-Term-1',
       fetchBtn: 'Fetch (صفحات تلاش کریں)',
       fetchingBtn: 'صفحات لوڈ ہو رہے ہیں...',
       downloadPdfBtn: 'Download PDF',
@@ -277,7 +277,7 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
       heroTitle: 'मुफ़्त Scribd PDF डाउनलोडर',
       heroSubtitle:
         'नीचे कोई भी Scribd दस्तावेज़ लिंक पेस्ट करें, सभी पेज नंबर डिटेक्ट करने के लिए Fetch पर क्लिक करें और ओरिजिनल फाइल के लिए Download PDF दबाएं।',
-      inputPlaceholder: 'https://www.scribd.com/document/436350615/Sample-PDF-Document',
+      inputPlaceholder: 'https://www.scribd.com/document/991278283/2026-Grade-12-Investigation-Term-1',
       fetchBtn: 'Fetch',
       fetchingBtn: 'पेज लोड हो रहे हैं...',
       downloadPdfBtn: 'Download PDF',
@@ -305,7 +305,7 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
       heroTitle: 'Descargador de PDF de Scribd Gratis',
       heroSubtitle:
         'Pegue cualquier enlace de documento de Scribd a continuación, haga clic en Fetch para detectar todas las páginas al instante y descargue el PDF original.',
-      inputPlaceholder: 'https://www.scribd.com/document/436350615/Sample-PDF-Document',
+      inputPlaceholder: 'https://www.scribd.com/document/991278283/2026-Grade-12-Investigation-Term-1',
       fetchBtn: 'Fetch',
       fetchingBtn: 'Buscando páginas...',
       downloadPdfBtn: 'Download PDF',
@@ -333,7 +333,7 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
       heroTitle: 'تحميل ملفات PDF من Scribd مجاناً',
       heroSubtitle:
         'الصق رابط مستند Scribd أدناه، واضغط على Fetch لاكتشاف جميع الصفحات فوراً، ثم اضغط على Download PDF لتحميل الملف الأصلي.',
-      inputPlaceholder: 'https://www.scribd.com/document/436350615/Sample-PDF-Document',
+      inputPlaceholder: 'https://www.scribd.com/document/991278283/2026-Grade-12-Investigation-Term-1',
       fetchBtn: 'Fetch',
       fetchingBtn: 'جاري فحص الصفحات...',
       downloadPdfBtn: 'Download PDF',

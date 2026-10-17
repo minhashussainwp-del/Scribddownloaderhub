@@ -32,7 +32,11 @@ async function startServer() {
     }
 
     try {
-      const parsedUrl = new URL(targetUrl);
+      const normalizedUrl = targetUrl.replace(
+        /^http:\/\/html\.scribd\.com\//i,
+        'https://html.scribdassets.com/'
+      );
+      const parsedUrl = new URL(normalizedUrl);
       const allowedHosts = ['scribd.com', 'scribdassets.com', 'wsrv.nl'];
       const isAllowed = allowedHosts.some((h) => parsedUrl.hostname.endsWith(h));
       if (!isAllowed) {
@@ -40,9 +44,9 @@ async function startServer() {
         return;
       }
 
-      const upstream = await fetch(targetUrl, {
-        headers: getRandomHeaders('https://www.scribd.com/'),
-        signal: AbortSignal.timeout(10000)
+      const upstream = await fetch(normalizedUrl, {
+        headers: getRandomHeaders(normalizedUrl),
+        signal: AbortSignal.timeout(12000)
       });
 
       if (!upstream.ok) {
@@ -52,6 +56,15 @@ async function startServer() {
 
       const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
       const buffer = Buffer.from(await upstream.arrayBuffer());
+
+      if (contentType.includes('text/html') && buffer.length < 6000) {
+        const sampleText = buffer.toString('utf8');
+        if (sampleText.includes('<title>Client Challenge</title>') || sampleText.includes('/_fs-ch-')) {
+          res.status(503).json({ error: 'Fastly Client Challenge encountered' });
+          return;
+        }
+      }
+
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'public, max-age=86400');

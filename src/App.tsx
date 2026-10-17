@@ -28,7 +28,8 @@ import {
   parseEmbedHtmlAssets,
   parseJsonpPageContent,
   fetchPageImageBytes,
-  generateDocumentPdf
+  generateDocumentPdf,
+  isValidScribdPayload
 } from './lib/scribdCore';
 import {
   CmsStoreState,
@@ -262,7 +263,7 @@ export default function App() {
     setRoute(nextRoute);
   };
 
-  const raceViaRelayNodes = async (targetUrl: string, timeoutMs = 4500): Promise<string | null> => {
+  const raceViaRelayNodes = async (targetUrl: string, timeoutMs = 5500): Promise<string | null> => {
     const buildUrl = (node: RelayNode) => {
       if (node === 'direct-proxy') return `/api/proxy-asset?url=${encodeURIComponent(targetUrl)}`;
       if (node === 'allorigins') return `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
@@ -274,7 +275,9 @@ export default function App() {
       const resp = await fetch(buildUrl(node), { signal: AbortSignal.timeout(timeoutMs) });
       if (!resp.ok) throw new Error(`Status ${resp.status}`);
       const text = await resp.text();
-      if (!text || text.length < 60) throw new Error('Too short');
+      if (!isValidScribdPayload(text, targetUrl)) {
+        throw new Error('Fastly challenge or invalid payload');
+      }
       return text;
     };
 
@@ -294,36 +297,31 @@ export default function App() {
     docId: string,
     slugTitle?: string
   ): Promise<ScribdDocumentData> => {
-    const embedUrl = `https://www.scribd.com/embeds/${docId}/content?start_page=1&view_mode=scroll&access_key=key-fFexxf7r1bzEfWu3HKwf`;
-    const embedHtml = await raceViaRelayNodes(embedUrl, 5000);
+    const cleanEmbedUrl = `https://www.scribd.com/embeds/${docId}/content`;
+    const embedHtml = await raceViaRelayNodes(cleanEmbedUrl, 6000);
 
-    const pages: ScribdPage[] = [];
-    let title = slugTitle || `Scribd Document #${docId}`;
-    let pageCount = 1;
-    let assetPrefix: string | undefined;
-
-    if (embedHtml && embedHtml.length > 200) {
-      const parsedAssets = parseEmbedHtmlAssets(embedHtml);
-      if (parsedAssets.title) title = parsedAssets.title;
-      if (parsedAssets.pageCount > 0) pageCount = parsedAssets.pageCount;
-      assetPrefix = parsedAssets.assetPrefix;
-
-      const sortedNums = Array.from(parsedAssets.pagesMap.keys()).sort((a, b) => a - b);
-      for (const pNum of sortedNums) {
-        const item = parsedAssets.pagesMap.get(pNum)!;
-        pages.push({
-          pageNumber: pNum,
-          jsonpUrl: item.jsonpUrl,
-          imageUrl: item.imageUrl,
-          text: item.inlineText || `Page ${pNum} — ${title}`
-        });
-      }
+    if (!embedHtml) {
+      throw new Error('Client relays could not bypass challenge');
     }
 
-    if (pages.length === 0) {
+    const parsedAssets = parseEmbedHtmlAssets(embedHtml);
+    if (parsedAssets.pagesMap.size === 0) {
+      throw new Error('No pages discovered in client embed payload');
+    }
+
+    const pages: ScribdPage[] = [];
+    const title = parsedAssets.title || slugTitle || `Scribd Document #${docId}`;
+    const pageCount = Math.max(parsedAssets.pageCount, parsedAssets.pagesMap.size);
+    const assetPrefix = parsedAssets.assetPrefix;
+
+    const sortedNums = Array.from(parsedAssets.pagesMap.keys()).sort((a, b) => a - b);
+    for (const pNum of sortedNums) {
+      const item = parsedAssets.pagesMap.get(pNum)!;
       pages.push({
-        pageNumber: 1,
-        text: `${title}\nDocument ID: ${docId}`
+        pageNumber: pNum,
+        jsonpUrl: item.jsonpUrl,
+        imageUrl: item.imageUrl,
+        text: item.inlineText || `Page ${pNum} — ${title}`
       });
     }
 
@@ -334,7 +332,7 @@ export default function App() {
       description: `Complete unlocked Scribd document (#${docId})`,
       pageCount: Math.max(pageCount, pages.length),
       wordCount: pages.length * 180,
-      embedUrl,
+      embedUrl: `${cleanEmbedUrl}?start_page=1&view_mode=scroll&access_key=key-fFexxf7r1bzEfWu3HKwf`,
       originalUrl: `https://www.scribd.com/document/${docId}`,
       category: 'Scribd Document',
       assetPrefix,
@@ -362,7 +360,7 @@ export default function App() {
     const parsed = parseScribdInput(raw);
     if (!parsed) {
       setErrorMsg(
-        'Invalid Scribd URL. Please paste a link like https://www.scribd.com/document/436350615/Title'
+        'Invalid Scribd URL. Please paste a link like https://www.scribd.com/document/991278283/2026-Grade-12-Investigation-Term-1'
       );
       return;
     }
@@ -376,11 +374,11 @@ export default function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: raw }),
-          signal: AbortSignal.timeout(6500)
+          signal: AbortSignal.timeout(9000)
         });
         if (!response.ok) throw new Error('Server error');
         const data = await response.json();
-        if (!data?.document || data.document.pages.length <= 1) {
+        if (!data?.document || !Array.isArray(data.document.pages) || data.document.pages.length === 0) {
           throw new Error('Incomplete server pages');
         }
         return data.document;
@@ -388,11 +386,21 @@ export default function App() {
 
       const clientPromise = discoverAllPagesFastClient(parsed.id, parsed.slugTitle);
 
+      // Prefer `/api/resolve` (which uses WhatsApp/Facebook crawler bypass on Vercel serverless)
+      // or whichever resolves with valid multi-page manifest first
       let resolvedDoc: ScribdDocumentData;
       try {
-        resolvedDoc = await Promise.any([serverPromise, clientPromise]);
+        resolvedDoc = await Promise.any([
+          serverPromise.then((doc) => {
+            if (doc.pages.length <= 1 && !doc.pages[0]?.imageUrl && !doc.pages[0]?.jsonpUrl) {
+              throw new Error('Server returned single unverified page');
+            }
+            return doc;
+          }),
+          clientPromise
+        ]);
       } catch {
-        resolvedDoc = await clientPromise;
+        resolvedDoc = await serverPromise;
       }
 
       const verifiedPages: ScribdPage[] = [...resolvedDoc.pages];

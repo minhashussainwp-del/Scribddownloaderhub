@@ -26,36 +26,70 @@ export interface ScribdDocumentData {
   sourceMethod: 'live-scribd' | 'embed-parser' | 'proxy-bridge' | 'client-zero-block';
 }
 
-const USER_AGENTS = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0'
+/**
+ * Verified Crawler & Preview User-Agents that bypass Scribd's Fastly `<title>Client Challenge</title>`
+ * on cloud/serverless datacenter IPs (such as Vercel AWS Lambda).
+ * IMPORTANT: Do NOT attach spoofed `X-Forwarded-For` or `Sec-Fetch-*` headers to these UAs,
+ * as Fastly triggers a JS challenge when crawler UAs send browser `Sec-Fetch` headers.
+ */
+const EMBED_BYPASS_UAS = [
+  'WhatsApp/2.23.20.0',
+  'WhatsApp/2.24.12.78 A',
+  'WhatsApp/2.24.6.77 i'
+];
+
+const DOC_METADATA_UAS = [
+  'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+  'WhatsApp/2.23.20.0',
+  'Twitterbot/1.0'
 ];
 
 // Ultra-Fast In-Memory Caches
 const DOCUMENT_CACHE = new Map<string, ScribdDocumentData>();
 const IMAGE_BYTE_CACHE = new Map<string, { bytes: Uint8Array; isPng: boolean }>();
 
-export function getRandomHeaders(referer = 'https://www.google.com/') {
-  const ua = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
-  const randIp = `${Math.floor(Math.random() * 190) + 12}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+export function getRandomHeaders(targetUrl = '') {
+  const isEmbedOrJsonp =
+    targetUrl.includes('/embeds/') ||
+    targetUrl.includes('.jsonp') ||
+    targetUrl.includes('scribdassets.com');
+
+  const uaList = isEmbedOrJsonp ? EMBED_BYPASS_UAS : DOC_METADATA_UAS;
+  const ua = uaList[Math.floor(Math.random() * uaList.length)];
+
   return {
     'User-Agent': ua,
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
-    'Cache-Control': 'no-cache',
-    'Pragma': 'no-cache',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'cross-site',
-    'Upgrade-Insecure-Requests': '1',
-    'Referer': referer,
-    'X-Forwarded-For': randIp,
-    'X-Real-IP': randIp,
-    'CF-Connecting-IP': randIp
+    'Cache-Control': 'no-cache'
   };
+}
+
+/**
+ * Checks whether a fetched HTML/JSONP string is a valid Scribd payload
+ * and NOT a Fastly `<title>Client Challenge</title>` or rate-limit stub.
+ */
+export function isValidScribdPayload(text: string, targetUrl = ''): boolean {
+  if (!text || text.length < 60) return false;
+  if (
+    text.includes('<title>Client Challenge</title>') ||
+    text.includes('/_fs-ch-') ||
+    text.includes('JavaScript is disabled in your browser') ||
+    text.includes('Document deleted by owner')
+  ) {
+    return false;
+  }
+
+  if (targetUrl.includes('/embeds/')) {
+    return (
+      text.includes('outer_page_') ||
+      text.includes('docManager.addPage') ||
+      text.includes('scribdassets.com') ||
+      text.includes('.jsonp')
+    );
+  }
+
+  return true;
 }
 
 /**
@@ -96,7 +130,8 @@ function decodeHtmlEntities(str: string): string {
     .replace(/&#39;/g, "'")
     .replace(/&#x27;/g, "'")
     .replace(/&nbsp;/g, ' ')
-    .replace(/\s+/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
@@ -108,38 +143,65 @@ function stripHtmlTags(html: string): string {
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/p>/gi, '\n\n')
       .replace(/<\/div>/gi, '\n')
+      .replace(/<\/li>/gi, '\n')
       .replace(/<[^>]+>/g, ' ')
   );
 }
 
 /**
  * ULTRA-FAST PARALLEL RACE FETCHER (`Promise.any`):
- * Fires requests across Direct + multiple Anti-Block Relays simultaneously
- * and returns the FIRST valid response in milliseconds.
+ * Uses verified Fastly-bypass headers (`WhatsApp/2.23.20.0`) and strictly rejects
+ * any `<title>Client Challenge</title>` or empty proxy responses so `Promise.any`
+ * only resolves with genuine unlocked Scribd content.
  */
-export async function fetchWithAntiBlockFallback(targetUrl: string, timeoutMs = 5000): Promise<string | null> {
-  const attemptFetch = async (url: string, useCustomHeaders: boolean): Promise<string> => {
-    const resp = await fetch(url, {
-      headers: useCustomHeaders ? getRandomHeaders() : undefined,
+export async function fetchWithAntiBlockFallback(targetUrl: string, timeoutMs = 6500): Promise<string | null> {
+  const attemptDirectWithUa = async (ua: string): Promise<string> => {
+    const resp = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': ua,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      },
       signal: AbortSignal.timeout(timeoutMs)
     });
     if (!resp.ok) throw new Error(`Status ${resp.status}`);
     const text = await resp.text();
-    if (!text || text.length < 60) throw new Error('Empty payload');
+    if (!isValidScribdPayload(text, targetUrl)) {
+      throw new Error('Challenge or invalid payload');
+    }
+    return text;
+  };
+
+  const attemptViaProxy = async (proxyUrl: string): Promise<string> => {
+    const resp = await fetch(proxyUrl, {
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    if (!resp.ok) throw new Error(`Status ${resp.status}`);
+    const text = await resp.text();
+    if (!isValidScribdPayload(text, targetUrl)) {
+      throw new Error('Challenge or invalid proxy payload');
+    }
     return text;
   };
 
   const candidates: Promise<string>[] = [];
+
   if (typeof window !== 'undefined') {
-    candidates.push(attemptFetch(`/api/proxy-asset?url=${encodeURIComponent(targetUrl)}`, false));
+    // In browser: route through our Vercel serverless `/api/proxy-asset` which attaches `WhatsApp/2.23.20.0`
+    candidates.push(attemptViaProxy(`/api/proxy-asset?url=${encodeURIComponent(targetUrl)}`));
+    candidates.push(attemptViaProxy(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`));
+    candidates.push(attemptViaProxy(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`));
   } else {
-    candidates.push(attemptFetch(targetUrl, true));
+    // On Server / Vercel Serverless: race WhatsApp UA + fallback relays
+    candidates.push(attemptDirectWithUa('WhatsApp/2.23.20.0'));
+    candidates.push(attemptDirectWithUa('WhatsApp/2.24.12.78 A'));
+    if (!targetUrl.includes('/embeds/')) {
+      candidates.push(
+        attemptDirectWithUa('facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)')
+      );
+    }
+    candidates.push(attemptViaProxy(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`));
   }
-  candidates.push(
-    attemptFetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, false),
-    attemptFetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, false),
-    attemptFetch(`https://corsproxy.io/?${encodeURIComponent(targetUrl)}`, false)
-  );
 
   try {
     return await Promise.any(candidates);
@@ -149,18 +211,9 @@ export async function fetchWithAntiBlockFallback(targetUrl: string, timeoutMs = 
 }
 
 /**
- * Note: We DO NOT blindly guess `/images/N-hash.jpg` from `/pages/N-hash.jsonp`
- * because on Scribd, JSONP hashes and Image hashes are COMPLETELY DIFFERENT!
- * Guessing `/images/N-jsonpHash.jpg` causes 404/blank white placeholder images.
- */
-export function deriveImageUrlFromJsonp(_jsonpUrl?: string): string | undefined {
-  return undefined;
-}
-
-/**
  * Parses a Scribd JSONP page payload (`window.page1_callback(["<div class=\"newpage\"..."])`)
- * to extract the REAL high-res background scan image URLs (with their true image hash!)
- * AND all structured text lines on that page.
+ * or an inline `<div id="outer_page_1">` block to extract the REAL high-res scan image URLs
+ * (`https://html.scribdassets.com/.../images/N-hash.jpg` or `.png`) AND all text lines.
  */
 export function parseJsonpPageContent(rawJsonp: string, assetPrefix?: string): {
   imageUrls: string[];
@@ -171,7 +224,7 @@ export function parseJsonpPageContent(rawJsonp: string, assetPrefix?: string): {
 
   const firstBracket = rawJsonp.indexOf('[');
   const lastBracket = rawJsonp.lastIndexOf(']');
-  if (firstBracket !== -1 && lastBracket > firstBracket) {
+  if (firstBracket !== -1 && lastBracket > firstBracket && rawJsonp.includes('callback')) {
     try {
       const parsedArr = JSON.parse(rawJsonp.slice(firstBracket, lastBracket + 1));
       if (Array.isArray(parsedArr) && typeof parsedArr[0] === 'string') {
@@ -185,18 +238,19 @@ export function parseJsonpPageContent(rawJsonp: string, assetPrefix?: string): {
     }
   }
 
-  // Unescape any remaining escaped slashes or quotes
   htmlContent = htmlContent.replace(/\\\//g, '/').replace(/\\"/g, '"');
 
   const imgAttrRegex = /(?:orig|src)=["']([^"']+\.(?:jpg|jpeg|png)[^"']*)["']/gi;
   let match: RegExpExecArray | null;
   while ((match = imgAttrRegex.exec(htmlContent)) !== null) {
     let imgUrl = match[1].trim();
-    // Skip 1x1 blank spacer or transparent placeholder gifs/pngs
-    if (/spacer|blank|empty|1x1|transparent/i.test(imgUrl)) continue;
+    if (/spacer|blank|empty|1x1|transparent|errorIcon/i.test(imgUrl)) continue;
 
+    // Normalize `http://html.scribd.com/` -> `https://html.scribdassets.com/`
     if (imgUrl.startsWith('http://html.scribd.com/')) {
       imgUrl = imgUrl.replace('http://html.scribd.com/', 'https://html.scribdassets.com/');
+    } else if (imgUrl.startsWith('https://html.scribd.com/')) {
+      imgUrl = imgUrl.replace('https://html.scribd.com/', 'https://html.scribdassets.com/');
     } else if (imgUrl.startsWith('http://')) {
       imgUrl = imgUrl.replace('http://', 'https://');
     } else if (imgUrl.startsWith('//')) {
@@ -204,6 +258,7 @@ export function parseJsonpPageContent(rawJsonp: string, assetPrefix?: string): {
     } else if (!imgUrl.startsWith('http') && assetPrefix) {
       imgUrl = `${assetPrefix.replace(/\/$/, '')}/${imgUrl.replace(/^\//, '')}`;
     }
+
     if (!imageUrls.includes(imgUrl)) {
       imageUrls.push(imgUrl);
     }
@@ -215,7 +270,7 @@ export function parseJsonpPageContent(rawJsonp: string, assetPrefix?: string): {
 
 /**
  * Exhaustive Page Extractor for Scribd Embed HTML.
- * Extracts ALL pages with their real JSONP and direct image URLs.
+ * Extracts 100% of pages (`Page 1` to `Page N`) with their real JSONP and direct image URLs.
  */
 export function parseEmbedHtmlAssets(embedHtml: string): {
   title?: string;
@@ -234,37 +289,68 @@ export function parseEmbedHtmlAssets(embedHtml: string): {
     unescaped.match(/"title"\s*:\s*"([^"]+)"/i);
   if (embedTitleMatch?.[1]) {
     const cleanT = decodeHtmlEntities(embedTitleMatch[1].replace(/\s*\|\s*Scribd.*$/i, '').trim());
-    if (cleanT) title = cleanT;
+    if (cleanT && cleanT.toLowerCase() !== 'scribd' && cleanT !== 'Client Challenge') {
+      title = cleanT;
+    }
   }
 
   let assetPrefix: string | undefined;
   const prefixMatch =
     unescaped.match(/asset_prefix\s*[:=]\s*["'](https?:\/\/[^"']+)["']/i) ||
-    unescaped.match(/(https?:\/\/html\.scribdassets\.com\/[a-zA-Z0-9_-]+\/)/i);
+    unescaped.match(/(https?:\/\/(?:html[0-9-f]*\.scribdassets\.com|html\.scribd\.com)\/[a-zA-Z0-9_-]+\/)/i);
   if (prefixMatch?.[1]) {
-    assetPrefix = prefixMatch[1].replace(/^http:\/\//i, 'https://');
+    assetPrefix = prefixMatch[1]
+      .replace(/^http:\/\/html\.scribd\.com\//i, 'https://html.scribdassets.com/')
+      .replace(/^http:\/\//i, 'https://');
   }
 
   const pagesMap = new Map<number, { jsonpUrl?: string; imageUrl?: string; inlineText?: string }>();
 
-  // Pattern 1: Full JSONP URLs
-  const jsonpFullRegex = /https?:\/\/[^"'\s\\<>()]+\.scribdassets\.com\/[^"'\s\\<>()]+\/pages\/(\d+)-[a-zA-Z0-9]+\.jsonp/gi;
+  // Pattern 0: Explicit `docManager.addPage({ pageNum: N, ... contentUrl: "..." })` blocks
+  const addPageBlockRegex = /docManager\.addPage\(\{([\s\S]*?)\}\)/gi;
   let m: RegExpExecArray | null;
+  while ((m = addPageBlockRegex.exec(unescaped)) !== null) {
+    const body = m[1];
+    const pNumMatch = body.match(/pageNum\s*:\s*(\d+)/i);
+    if (!pNumMatch) continue;
+    const pNum = parseInt(pNumMatch[1], 10);
+    const existing = pagesMap.get(pNum) || {};
+
+    const contentUrlMatch = body.match(/contentUrl\s*:\s*["']([^"']+)["']/i);
+    if (contentUrlMatch?.[1]) {
+      let cUrl = contentUrlMatch[1]
+        .replace(/^http:\/\/html\.scribd\.com\//i, 'https://html.scribdassets.com/')
+        .replace(/^http:\/\//i, 'https://');
+      if (cUrl.endsWith('.jsonp')) {
+        existing.jsonpUrl = cUrl;
+      } else if (/\.(jpg|jpeg|png)/i.test(cUrl)) {
+        existing.imageUrl = cUrl;
+      }
+    }
+    pagesMap.set(pNum, existing);
+  }
+
+  // Pattern 1: Full JSONP URLs anywhere in the HTML
+  const jsonpFullRegex = /https?:\/\/[^"'\s\\<>()]+\.(?:scribdassets\.com|scribd\.com)\/[^"'\s\\<>()]+\/pages\/(\d+)-[a-zA-Z0-9]+\.jsonp/gi;
   while ((m = jsonpFullRegex.exec(unescaped)) !== null) {
     const pNum = parseInt(m[1], 10);
     const existing = pagesMap.get(pNum) || {};
     if (!existing.jsonpUrl) {
-      existing.jsonpUrl = m[0].replace(/^http:\/\//i, 'https://');
+      existing.jsonpUrl = m[0]
+        .replace(/^http:\/\/html\.scribd\.com\//i, 'https://html.scribdassets.com/')
+        .replace(/^http:\/\//i, 'https://');
       pagesMap.set(pNum, existing);
     }
   }
 
-  // Pattern 2: Full Image URLs explicitly present in the embed HTML
-  const imgFullRegex = /https?:\/\/[^"'\s\\<>()]+\.scribdassets\.com\/[^"'\s\\<>()]+\/images\/(\d+)-[a-zA-Z0-9]+\.(?:jpg|jpeg|png)/gi;
+  // Pattern 2: Full Image URLs explicitly present in the embed HTML (`scribdassets.com` OR `html.scribd.com`)
+  const imgFullRegex = /https?:\/\/[^"'\s\\<>()]+\.(?:scribdassets\.com|scribd\.com)\/[^"'\s\\<>()]+\/images\/(\d+)-[a-zA-Z0-9]+\.(?:jpg|jpeg|png)/gi;
   while ((m = imgFullRegex.exec(unescaped)) !== null) {
     const pNum = parseInt(m[1], 10);
     const existing = pagesMap.get(pNum) || {};
-    existing.imageUrl = m[0].replace(/^http:\/\//i, 'https://');
+    existing.imageUrl = m[0]
+      .replace(/^http:\/\/html\.scribd\.com\//i, 'https://html.scribdassets.com/')
+      .replace(/^http:\/\//i, 'https://');
     pagesMap.set(pNum, existing);
   }
 
@@ -291,7 +377,7 @@ export function parseEmbedHtmlAssets(embedHtml: string): {
     }
   }
 
-  // Pattern 4: Extract inline page HTML for pages 1-3 that Scribd embeds directly in `<div id="page1">...</div>`
+  // Pattern 4: Extract inline page HTML for pages 1-3 (`<div class="outer_page ..." id="outer_page_1">...`)
   const inlinePageRegex = /<div[^>]+id=["']outer_page_(\d+)["'][^>]*>([\s\S]*?)(?=<div[^>]+id=["']outer_page_\d+["']|<script|$)/gi;
   while ((m = inlinePageRegex.exec(unescaped)) !== null) {
     const pNum = parseInt(m[1], 10);
@@ -301,13 +387,13 @@ export function parseEmbedHtmlAssets(embedHtml: string): {
     if (!existing.imageUrl && parsedInline.imageUrls.length > 0) {
       existing.imageUrl = parsedInline.imageUrls[0];
     }
-    if (parsedInline.text && parsedInline.text.length > 10) {
+    if (parsedInline.text && parsedInline.text.length > 5) {
       existing.inlineText = parsedInline.text;
     }
     pagesMap.set(pNum, existing);
   }
 
-  // Pattern 5: Check explicit page count in Scribd JS config
+  // Pattern 5: Check explicit page count in Scribd JS config or `outer_page_N` IDs
   let declaredPageCount = 0;
   const pageCountMatches = [
     unescaped.match(/"page_count"\s*:\s*(\d+)/i),
@@ -324,9 +410,12 @@ export function parseEmbedHtmlAssets(embedHtml: string): {
     }
   }
 
+  const outerPageIds = [...unescaped.matchAll(/outer_page_(\d+)/gi)].map((x) => parseInt(x[1], 10));
+  const maxOuterPage = outerPageIds.length > 0 ? Math.max(...outerPageIds) : 0;
+
   const discoveredNums = Array.from(pagesMap.keys());
   const maxDiscovered = discoveredNums.length > 0 ? Math.max(...discoveredNums) : 0;
-  const finalPageCount = Math.max(declaredPageCount, maxDiscovered);
+  const finalPageCount = Math.max(declaredPageCount, maxOuterPage, maxDiscovered);
 
   for (let p = 1; p <= finalPageCount; p++) {
     if (!pagesMap.has(p)) {
@@ -339,7 +428,7 @@ export function parseEmbedHtmlAssets(embedHtml: string): {
 
 /**
  * Resolves a Scribd document by ID or URL AND inspects page JSONP streams in parallel
- * so every page has its REAL verified image URL and text!
+ * so every page (`Page 1` to `Page N`) has its REAL verified image URL and text!
  */
 export async function resolveScribdDocument(rawInput: string): Promise<ScribdDocumentData> {
   const parsed = parseScribdInput(rawInput);
@@ -356,40 +445,60 @@ export async function resolveScribdDocument(rawInput: string): Promise<ScribdDoc
 
   const docUrl = `https://www.scribd.com/document/${id}`;
   const defaultAccessKey = 'key-fFexxf7r1bzEfWu3HKwf';
-  const targetEmbedUrl = `https://www.scribd.com/embeds/${id}/content?start_page=1&view_mode=scroll&access_key=${defaultAccessKey}`;
+  const targetEmbedUrl = `https://www.scribd.com/embeds/${id}/content`;
 
   let title = slugTitle || `Scribd Document #${id}`;
   let author = 'Scribd Contributor';
-  const description = `Unlocked Scribd document (#${id}) ready for instant viewing and high-speed PDF download.`;
+  let description = `Unlocked Scribd document (#${id}) ready for instant viewing and high-speed PDF download.`;
   let pageCount = 0;
   let thumbnailUrl: string | undefined;
   let assetPrefix: string | undefined;
   const pages: ScribdPage[] = [];
-  let sourceMethod: ScribdDocumentData['sourceMethod'] = 'embed-parser';
+  const sourceMethod: ScribdDocumentData['sourceMethod'] = 'embed-parser';
 
-  const oembedPromise = (async () => {
+  // Fetch metadata from main document page using Facebook/WhatsApp preview crawler UA (also bypasses Fastly challenge)
+  const docMetaPromise = (async () => {
     try {
-      const oembedUrl = `https://www.scribd.com/services/oembed?format=json&url=${encodeURIComponent(docUrl)}`;
-      const resp = await fetch(oembedUrl, {
-        headers: getRandomHeaders(),
-        signal: AbortSignal.timeout(3500)
+      const resp = await fetch(docUrl, {
+        headers: {
+          'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+          'Accept': 'text/html,application/xhtml+xml'
+        },
+        signal: AbortSignal.timeout(4500)
       });
-      if (resp.ok) {
-        return await resp.json();
-      }
+      if (!resp.ok) return null;
+      const html = await resp.text();
+      const titleMatch =
+        html.match(/property=["']og:title["']\s+content=["']([^"']+)["']/i) ||
+        html.match(/<title>([^<]+)<\/title>/i);
+      const descMatch = html.match(/property=["']og:description["']\s+content=["']([^"']+)["']/i);
+      const imgMatch = html.match(/property=["']og:image["']\s+content=["']([^"']+)["']/i);
+      const pageCountMatch = html.match(/"page_count"\s*:\s*(\d+)/i);
+      const formatIdMatch = html.match(/"format_id"\s*:\s*"([a-zA-Z0-9_-]+)"/i);
+
+      return {
+        title: titleMatch?.[1] ? decodeHtmlEntities(titleMatch[1].replace(/\s*\|\s*Scribd.*$/i, '')) : undefined,
+        description: descMatch?.[1] ? decodeHtmlEntities(descMatch[1]) : undefined,
+        thumbnailUrl: imgMatch?.[1],
+        pageCount: pageCountMatch?.[1] ? parseInt(pageCountMatch[1], 10) : 0,
+        formatId: formatIdMatch?.[1]
+      };
     } catch {
-      // ignore
+      return null;
     }
-    return null;
   })();
 
-  const embedHtmlPromise = fetchWithAntiBlockFallback(targetEmbedUrl, 5000);
-  const [oembedData, embedHtml] = await Promise.all([oembedPromise, embedHtmlPromise]);
+  const embedHtmlPromise = fetchWithAntiBlockFallback(targetEmbedUrl, 6500);
+  const [docMeta, embedHtml] = await Promise.all([docMetaPromise, embedHtmlPromise]);
 
-  if (oembedData) {
-    if (oembedData.title) title = decodeHtmlEntities(String(oembedData.title));
-    if (oembedData.author_name) author = decodeHtmlEntities(String(oembedData.author_name));
-    if (oembedData.thumbnail_url) thumbnailUrl = String(oembedData.thumbnail_url);
+  if (docMeta) {
+    if (docMeta.title && docMeta.title !== 'Client Challenge') title = docMeta.title;
+    if (docMeta.description) description = docMeta.description;
+    if (docMeta.thumbnailUrl) thumbnailUrl = docMeta.thumbnailUrl;
+    if (docMeta.pageCount && docMeta.pageCount > pageCount) pageCount = docMeta.pageCount;
+    if (docMeta.formatId) {
+      assetPrefix = `https://html.scribdassets.com/${docMeta.formatId}/`;
+    }
   }
 
   if (embedHtml) {
@@ -415,7 +524,7 @@ export async function resolveScribdDocument(rawInput: string): Promise<ScribdDoc
           const entry = parsedAssets.pagesMap.get(pNum)!;
           if (entry.jsonpUrl && (!entry.imageUrl || !entry.inlineText)) {
             try {
-              const rawJp = await fetchWithAntiBlockFallback(entry.jsonpUrl, 3500);
+              const rawJp = await fetchWithAntiBlockFallback(entry.jsonpUrl, 4000);
               if (rawJp) {
                 const parsedJp = parseJsonpPageContent(rawJp, assetPrefix);
                 if (!entry.imageUrl && parsedJp.imageUrls.length > 0) {
@@ -426,7 +535,7 @@ export async function resolveScribdDocument(rawInput: string): Promise<ScribdDoc
                 }
               }
             } catch {
-              // Will retry on client if needed
+              // Client can also resolve any remaining JSONP if needed
             }
           }
         })
@@ -462,7 +571,7 @@ export async function resolveScribdDocument(rawInput: string): Promise<ScribdDoc
     description,
     pageCount: Math.max(pageCount, pages.length),
     wordCount: pages.length * 180,
-    embedUrl: targetEmbedUrl,
+    embedUrl: `${targetEmbedUrl}?start_page=1&view_mode=scroll&access_key=${defaultAccessKey}`,
     originalUrl: docUrl,
     category: 'Scribd Document',
     accessKey: defaultAccessKey,
@@ -486,15 +595,12 @@ export async function resolveScribdDocument(rawInput: string): Promise<ScribdDoc
  * JPEG (`FF D8 FF`) or PNG (`89 50 4E 47`) and NOT an HTML error page, WebP, or 1x1 blank spacer!
  */
 function inspectValidImageFormat(bytes: Uint8Array): 'jpg' | 'png' | null {
-  // Reject tiny 1x1 blank spacers or error stubs (< 1.2 KB)
   if (!bytes || bytes.byteLength < 1200) return null;
 
-  // Check JPEG magic bytes: FF D8 FF
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
     return 'jpg';
   }
 
-  // Check PNG magic bytes: 89 50 4E 47 0D 0A 1A 0A
   if (
     bytes[0] === 0x89 &&
     bytes[1] === 0x50 &&
@@ -509,14 +615,14 @@ function inspectValidImageFormat(bytes: Uint8Array): 'jpg' | 'png' | null {
 
 /**
  * ULTRA-FAST PARALLEL RACE IMAGE FETCHER (`Promise.any`) WITH MAGIC-BYTE VALIDATION:
- * Forces `output=jpg` on wsrv.nl so WebP is never returned, verifies real JPEG/PNG magic bytes,
- * and rejects blank 1x1 placeholder images!
  */
 export async function fetchPageImageBytes(
   imageUrl: string,
   useClientProxyEndpoint = false
 ): Promise<{ bytes: Uint8Array; isPng: boolean } | null> {
-  const cleanUrl = imageUrl.replace(/^http:\/\//i, 'https://');
+  const cleanUrl = imageUrl
+    .replace(/^http:\/\/html\.scribd\.com\//i, 'https://html.scribdassets.com/')
+    .replace(/^http:\/\//i, 'https://');
   const cached = IMAGE_BYTE_CACHE.get(cleanUrl);
   if (cached) return cached;
 
@@ -525,7 +631,7 @@ export async function fetchPageImageBytes(
     withHeaders = false
   ): Promise<{ bytes: Uint8Array; isPng: boolean }> => {
     const resp = await fetch(url, {
-      headers: withHeaders ? getRandomHeaders() : undefined,
+      headers: withHeaders ? getRandomHeaders(cleanUrl) : undefined,
       signal: AbortSignal.timeout(6000)
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -539,7 +645,6 @@ export async function fetchPageImageBytes(
   };
 
   const candidates: Promise<{ bytes: Uint8Array; isPng: boolean }>[] = [
-    // Always force standard JPG output from wsrv.nl so pdf-lib never gets unsupported WebP!
     fetchCandidate(`https://wsrv.nl/?url=${encodeURIComponent(cleanUrl)}&output=jpg&q=92`, false),
     fetchCandidate(cleanUrl, typeof window === 'undefined')
   ];
@@ -559,8 +664,6 @@ export async function fetchPageImageBytes(
 
 /**
  * ULTRA-FAST CONCURRENT PDF COMPILER:
- * Fetches every page's real JSONP (to discover the true image hash + full text) and embeds
- * both the verified high-resolution page scan AND any extracted text so NO PAGE IS EVER BLANK!
  */
 export async function generateDocumentPdf(
   doc: ScribdDocumentData,
@@ -646,7 +749,6 @@ export async function generateDocumentPdf(
         let targetImageUrl = pageData.imageUrl;
         let targetText = pageData.text;
 
-        // Always inspect the page's JSONP if we don't have a verified image or rich text yet!
         if (pageData.jsonpUrl && (!targetImageUrl || targetText.startsWith(`Page ${pageData.pageNumber} —`))) {
           try {
             const rawJp = await fetchWithAntiBlockFallback(pageData.jsonpUrl, 4500);
@@ -683,7 +785,6 @@ export async function generateDocumentPdf(
     );
   }
 
-  // PHASE 2: Assemble Non-Blank PDF Pages in strict order (Page 1 .. Page N)
   for (let idx = 0; idx < totalPages; idx++) {
     const item = preparedPages[idx];
     let imageEmbedded = false;
@@ -711,18 +812,15 @@ export async function generateDocumentPdf(
             height: drawH
           });
 
-          // If this is a hybrid Scribd page where text sits on top of a background graphic,
-          // and the image itself is relatively small in byte size (< 35KB, meaning a background template or diagram),
-          // also overlay the extracted text so the page is never blank!
           const hasRealExtractedText =
             item.text &&
             item.text.trim().length > 20 &&
             !item.text.startsWith(`Page ${item.pageNumber} —`);
 
-          if (item.imgData.bytes.byteLength < 35000 && hasRealExtractedText) {
+          if (item.imgData.bytes.byteLength < 45000 && hasRealExtractedText) {
             let textY = pageH - margin - 20;
             const lines = wrapText(item.text, fontRegular, 10, contentWidth);
-            for (const line of lines.slice(0, 42)) {
+            for (const line of lines.slice(0, 44)) {
               if (textY < margin) break;
               if (line.trim()) {
                 page.drawText(line, {
@@ -748,7 +846,6 @@ export async function generateDocumentPdf(
       let page = pdfDoc.addPage([defaultWidth, defaultHeight]);
       let y = defaultHeight - margin;
 
-      // Top Header Bar
       page.drawText(sanitizeForPdf(doc.title.slice(0, 58)), {
         x: margin,
         y,
@@ -799,7 +896,6 @@ export async function generateDocumentPdf(
         }
       }
 
-      // Bottom Footer Rule
       page.drawLine({
         start: { x: margin, y: margin - 8 },
         end: { x: defaultWidth - margin, y: margin - 8 },
