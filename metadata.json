@@ -1,0 +1,6 @@
+{
+  "name": "ScribdFlow — Document Extractor & PDF Downloader",
+  "description": "Free online Scribd PDF downloader and document viewer. Fetch full pages and download original PDF documents instantly.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
