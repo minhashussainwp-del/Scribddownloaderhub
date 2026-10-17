@@ -1,4 +1,31 @@
-import { getRandomHeaders } from '../src/lib/scribdCore';
+const EMBED_BYPASS_UAS = [
+  'WhatsApp/2.23.20.0',
+  'WhatsApp/2.24.12.78 A',
+  'WhatsApp/2.24.6.77 i'
+];
+
+const DOC_METADATA_UAS = [
+  'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+  'WhatsApp/2.23.20.0',
+  'Twitterbot/1.0'
+];
+
+function getStealthHeaders(targetUrl = '') {
+  const isEmbedOrJsonp =
+    targetUrl.includes('/embeds/') ||
+    targetUrl.includes('.jsonp') ||
+    targetUrl.includes('scribdassets.com');
+
+  const uaList = isEmbedOrJsonp ? EMBED_BYPASS_UAS : DOC_METADATA_UAS;
+  const ua = uaList[Math.floor(Math.random() * uaList.length)];
+
+  return {
+    'User-Agent': ua,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Cache-Control': 'no-cache'
+  };
+}
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -27,8 +54,8 @@ export default async function handler(req: any, res: any) {
     }
 
     const upstream = await fetch(normalizedUrl, {
-      headers: getRandomHeaders(normalizedUrl),
-      signal: AbortSignal.timeout(12000)
+      headers: getStealthHeaders(normalizedUrl),
+      signal: AbortSignal.timeout(8500)
     });
 
     if (!upstream.ok) {
@@ -39,7 +66,6 @@ export default async function handler(req: any, res: any) {
     const arrayBuffer = await upstream.arrayBuffer();
     const buf = Buffer.from(arrayBuffer);
 
-    // Reject Fastly `<title>Client Challenge</title>` so client relays know immediately if challenged
     if (contentType.includes('text/html') && buf.length < 6000) {
       const sampleText = buf.toString('utf8');
       if (sampleText.includes('<title>Client Challenge</title>') || sampleText.includes('/_fs-ch-')) {

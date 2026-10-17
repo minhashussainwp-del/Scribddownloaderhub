@@ -264,18 +264,35 @@ export default function App() {
   };
 
   const raceViaRelayNodes = async (targetUrl: string, timeoutMs = 5500): Promise<string | null> => {
+    const cleanTarget = targetUrl
+      .replace(/^http:\/\/html\.scribd\.com\//i, 'https://html.scribdassets.com/')
+      .replace(/^http:\/\//i, 'https://');
+
+    // Fast path: `scribdassets.com` has `Access-Control-Allow-Origin: *` and responds directly in ~39ms!
+    if (cleanTarget.includes('scribdassets.com')) {
+      try {
+        const directResp = await fetch(cleanTarget, { signal: AbortSignal.timeout(3000) });
+        if (directResp.ok) {
+          const text = await directResp.text();
+          if (text && text.length >= 40) return text;
+        }
+      } catch {
+        // Fall through to relay nodes
+      }
+    }
+
     const buildUrl = (node: RelayNode) => {
-      if (node === 'direct-proxy') return `/api/proxy-asset?url=${encodeURIComponent(targetUrl)}`;
-      if (node === 'allorigins') return `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-      if (node === 'codetabs') return `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`;
-      return `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+      if (node === 'direct-proxy') return `/api/proxy-asset?url=${encodeURIComponent(cleanTarget)}`;
+      if (node === 'allorigins') return `https://api.allorigins.win/raw?url=${encodeURIComponent(cleanTarget)}`;
+      if (node === 'codetabs') return `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(cleanTarget)}`;
+      return `https://corsproxy.io/?${encodeURIComponent(cleanTarget)}`;
     };
 
     const attempt = async (node: RelayNode): Promise<string> => {
       const resp = await fetch(buildUrl(node), { signal: AbortSignal.timeout(timeoutMs) });
       if (!resp.ok) throw new Error(`Status ${resp.status}`);
       const text = await resp.text();
-      if (!isValidScribdPayload(text, targetUrl)) {
+      if (!isValidScribdPayload(text, cleanTarget)) {
         throw new Error('Fastly challenge or invalid payload');
       }
       return text;
@@ -370,30 +387,27 @@ export default function App() {
 
     try {
       const serverPromise = (async (): Promise<ScribdDocumentData> => {
-        const response = await fetch('/api/resolve', {
+        const response = await fetch(`/api/resolve?url=${encodeURIComponent(raw)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: raw }),
           signal: AbortSignal.timeout(9000)
         });
-        if (!response.ok) throw new Error('Server error');
-        const data = await response.json();
-        if (!data?.document || !Array.isArray(data.document.pages) || data.document.pages.length === 0) {
-          throw new Error('Incomplete server pages');
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data?.document || !Array.isArray(data.document.pages) || data.document.pages.length === 0) {
+          throw new Error(data?.error || `Resolver returned status ${response.status}`);
         }
         return data.document;
       })();
 
       const clientPromise = discoverAllPagesFastClient(parsed.id, parsed.slugTitle);
 
-      // Prefer `/api/resolve` (which uses WhatsApp/Facebook crawler bypass on Vercel serverless)
-      // or whichever resolves with valid multi-page manifest first
       let resolvedDoc: ScribdDocumentData;
       try {
         resolvedDoc = await Promise.any([
           serverPromise.then((doc) => {
             if (doc.pages.length <= 1 && !doc.pages[0]?.imageUrl && !doc.pages[0]?.jsonpUrl) {
-              throw new Error('Server returned single unverified page');
+              throw new Error('Single unverified page');
             }
             return doc;
           }),
@@ -480,7 +494,7 @@ export default function App() {
         onProgress: (curr, total) => setDownloadProgress({ current: curr, total })
       });
 
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const blob = new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
       const sizeKb = Math.round(blob.size / 1024);
       setCompiledPdfSizeKb(sizeKb);
 

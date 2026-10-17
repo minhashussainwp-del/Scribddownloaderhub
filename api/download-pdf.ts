@@ -1,4 +1,4 @@
-import { resolveScribdDocument, generateDocumentPdf } from '../src/lib/scribdCore';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -10,28 +10,39 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const body = req.method === 'POST' ? req.body || {} : req.query || {};
-    const {
-      url,
-      document: providedDoc,
-      includeCoverPage = true,
-      includeMetadataFooter = true,
-      pageSize = 'A4'
-    } = body;
+    const body =
+      typeof req.body === 'string'
+        ? JSON.parse(req.body || '{}')
+        : req.body || req.query || {};
 
-    const doc = providedDoc || (url ? await resolveScribdDocument(String(url)) : null);
-    if (!doc) {
+    const doc = body.document;
+    if (!doc || !Array.isArray(doc.pages)) {
       return res.status(400).json({
-        error: 'Document payload or Scribd URL is required to generate PDF.'
+        error: 'Document payload is required to generate PDF.'
       });
     }
 
-    const pdfBytes = await generateDocumentPdf(doc, {
-      includeCoverPage: Boolean(includeCoverPage),
-      includeMetadataFooter: Boolean(includeMetadataFooter),
-      pageSize: pageSize === 'LETTER' ? 'LETTER' : 'A4'
-    });
+    const pdfDoc = await PDFDocument.create();
+    pdfDoc.setTitle(doc.title || `Scribd Document #${doc.id}`);
+    const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
+    for (const p of doc.pages) {
+      const page = pdfDoc.addPage([595.28, 841.89]);
+      const cleanText = String(p.text || `Page ${p.pageNumber}`)
+        .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, '')
+        .slice(0, 1800);
+      page.drawText(cleanText, {
+        x: 42,
+        y: 780,
+        size: 10,
+        font: fontRegular,
+        maxWidth: 510,
+        lineHeight: 14,
+        color: rgb(0.1, 0.1, 0.15)
+      });
+    }
+
+    const pdfBytes = await pdfDoc.save();
     const safeFilename =
       String(doc.title || `scribd-${doc.id}`)
         .replace(/[^a-zA-Z0-9_-]+/g, '-')
@@ -41,8 +52,6 @@ export default async function handler(req: any, res: any) {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}.pdf"`);
     res.setHeader('Content-Length', pdfBytes.byteLength.toString());
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-
     return res.status(200).send(Buffer.from(pdfBytes));
   } catch (err: any) {
     return res.status(500).json({

@@ -8,7 +8,7 @@ import {
   getCuratedSamples,
   getRandomHeaders,
   ScribdDocumentData
-} from './src/lib/scribdCore.ts';
+} from './src/lib/scribdCore';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -78,7 +78,11 @@ async function startServer() {
   // Resolve Scribd URL or Document ID
   app.post('/api/resolve', async (req, res) => {
     try {
-      const { url } = req.body as { url?: string };
+      const parsedBody =
+        typeof req.body === 'string'
+          ? JSON.parse(req.body || '{}')
+          : req.body || {};
+      const url = parsedBody.url || parsedBody.id || (req.query.url as string) || (req.query.id as string);
       if (!url || typeof url !== 'string') {
         res.status(400).json({ error: 'Please provide a valid Scribd URL or Document ID.' });
         return;
