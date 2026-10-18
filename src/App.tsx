@@ -428,10 +428,19 @@ export default function App() {
         const translatedPost = cms.blogPosts.find(
           (p) =>
             p.translationGroupId === currentPost.translationGroupId &&
-            p.lang === langCode
+            p.lang.toLowerCase() === langCode.toLowerCase()
         );
         if (translatedPost) {
           nextRoute = { view: 'blog-post', slug: translatedPost.slug };
+        } else {
+          const defaultPost = cms.blogPosts.find(
+            (p) =>
+              p.translationGroupId === currentPost.translationGroupId &&
+              (p.lang === 'en' || p.lang === cms.languages.find((l) => l.isDefault)?.code)
+          );
+          if (defaultPost) {
+            nextRoute = { view: 'blog-post', slug: defaultPost.slug };
+          }
         }
       }
     } else if (route.view === 'custom-page') {
@@ -440,10 +449,20 @@ export default function App() {
         const translatedPage = cms.pages.find(
           (p) =>
             p.translationGroupId === currentPage.translationGroupId &&
-            p.lang === langCode
+            p.lang.toLowerCase() === langCode.toLowerCase()
         );
         if (translatedPage) {
           nextRoute = { view: 'custom-page', slug: translatedPage.slug };
+        } else {
+          // If no direct translation exists, resolve to default/English variation
+          const defaultPage = cms.pages.find(
+            (p) =>
+              p.translationGroupId === currentPage.translationGroupId &&
+              (p.lang === 'en' || p.lang === cms.languages.find((l) => l.isDefault)?.code)
+          );
+          if (defaultPage) {
+            nextRoute = { view: 'custom-page', slug: defaultPage.slug };
+          }
         }
       }
     }
@@ -2375,19 +2394,83 @@ export default function App() {
                 return (
                   <div className="space-y-6">
                     {renderAdSlot('page-top-banner')}
+
+                    {/* Subtle Multilingual Fallback Notice if translation is not ready yet */}
+                    {pg.lang.toLowerCase() !== cms.activeLanguage.toLowerCase() && (
+                      <div className="p-4 bg-blue-50/90 border border-blue-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-blue-900 shadow-2xs">
+                        <div className="flex items-center gap-2.5">
+                          <Globe className="w-4 h-4 text-blue-600 shrink-0" />
+                          <span>
+                            This page is not yet available in{' '}
+                            <strong>
+                              {activeLangObj.name} ({activeLangObj.code.toUpperCase()})
+                            </strong>
+                            . Showing the standard <strong>{pg.lang.toUpperCase()}</strong> version.
+                          </span>
+                        </div>
+                        <div className="text-[11px] font-mono text-blue-700 opacity-80">
+                          Auto-Fallbacked
+                        </div>
+                      </div>
+                    )}
+
                     <article className="bg-white border border-slate-200 rounded-xl p-6 sm:p-10 space-y-6">
-                      <div className="flex items-center justify-between border-b border-slate-200 pb-4">
-                        <h1 className="text-2xl font-bold text-slate-900 font-display">
-                          {pg.title}
-                        </h1>
-                        <button
-                          type="button"
-                          onClick={() => setRoute({ view: 'home' })}
-                          className="px-3 py-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-1 cursor-pointer"
-                        >
-                          <ArrowLeft className="w-3.5 h-3.5" />
-                          <span>{t.navDownloader}</span>
-                        </button>
+                      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-5">
+                        <div>
+                          <h1 className="text-2xl font-bold text-slate-900 font-display">
+                            {pg.title}
+                          </h1>
+                          <div className="flex items-center gap-2 text-xs text-slate-500 font-mono mt-1">
+                            <span>/p/{pg.slug}</span>
+                            <span>·</span>
+                            <span className="uppercase">{pg.lang}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2.5 flex-wrap">
+                          {/* Available Language Variations Switcher Bar */}
+                          <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+                            {cms.languages
+                              .filter((l) => l.enabled)
+                              .map((l) => {
+                                const variation = cms.pages.find(
+                                  (p) =>
+                                    p.translationGroupId === pg.translationGroupId &&
+                                    p.lang.toLowerCase() === l.code.toLowerCase()
+                                );
+                                if (!variation) return null;
+                                const isCurrent = pg.id === variation.id;
+                                return (
+                                  <button
+                                    key={l.code}
+                                    type="button"
+                                    onClick={() => {
+                                      handleUpdateCms({ ...cms, activeLanguage: l.code });
+                                      setRoute({ view: 'custom-page', slug: variation.slug });
+                                    }}
+                                    className={`px-2.5 py-1 text-xs rounded-md font-bold flex items-center gap-1 cursor-pointer transition-colors ${
+                                      isCurrent
+                                        ? 'bg-[#0f172a] text-white shadow-2xs'
+                                        : 'text-slate-700 hover:bg-white'
+                                    }`}
+                                    title={`View in ${l.name} (${l.code.toUpperCase()})`}
+                                  >
+                                    <span>{l.flag}</span>
+                                    <span className="uppercase text-[11px]">{l.code}</span>
+                                  </button>
+                                );
+                              })}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setRoute({ view: 'home' })}
+                            className="px-3 py-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg flex items-center gap-1 cursor-pointer"
+                          >
+                            <ArrowLeft className="w-3.5 h-3.5" />
+                            <span>{t.navDownloader}</span>
+                          </button>
+                        </div>
                       </div>
 
                       {renderRichContentWithDownloader(

@@ -1154,6 +1154,36 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
       seoDescription: 'Learn more about our ultra-fast Scribd document viewer and PDF downloader.'
     },
     {
+      id: 'page-about-ur',
+      slug: 'about-us-ur',
+      lang: 'ur',
+      translationGroupId: 'group-page-about',
+      title: 'ہمارے متعلق (About Us)',
+      contentHtml: `<h2>تیز رفتار، محفوظ اور مکمل Scribd ڈاکومنٹ آرکائیونگ</h2>
+<p>ScribdDownloader طلباء، محققین اور پروفیشنلز کے لیے ڈیزائن کیا گیا ہے تاکہ وہ کسی بھی عوامی Scribd ڈاکومنٹ کو آسانی سے محفوظ کر سکیں۔</p>`,
+      switcherSections: [
+        {
+          id: 'about-ur-tab-1',
+          tabLabel: 'ہمارا مشن',
+          badgeText: 'Mission',
+          title: 'محققین اور طلباء کے لیے بنایا گیا',
+          contentHtml: `<p>ہم چاہتے ہیں کہ تعلیمی مواد اور کتابیں بغیر کسی رکاوٹ کے ہر ایک کی پہنچ میں ہوں۔</p>`
+        },
+        {
+          id: 'about-ur-tab-2',
+          tabLabel: '24x متوازی انجن',
+          badgeText: 'Technology',
+          title: 'تیز ترین ملٹی پیج PDF کمپائلر کی تفصیل',
+          contentHtml: `<p>ہمارا سسٹم متوازی گیٹ ویز کے ذریعے تمام صفحات کو نمبر کے ساتھ اسکین کرتا ہے۔</p>`
+        }
+      ],
+      showInHeader: true,
+      showInFooter: true,
+      status: 'published',
+      seoTitle: 'ہمارے متعلق — ScribdDownloader',
+      seoDescription: 'ScribdDownloader کے متعلق تفصیلات اور ہماری ٹیکنالوجی کے بارے میں جانیں۔'
+    },
+    {
       id: 'page-contact-en',
       slug: 'contact-us',
       lang: 'en',
@@ -1172,6 +1202,26 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
       status: 'published',
       seoTitle: 'Contact Us — ScribdDownloader Support',
       seoDescription: 'Contact our technical support team for help with Scribd PDF downloads.'
+    },
+    {
+      id: 'page-contact-ur',
+      slug: 'contact-us-ur',
+      lang: 'ur',
+      translationGroupId: 'group-page-contact',
+      title: 'ہم سے رابطہ کریں (Contact Us)',
+      contentHtml: `<h2>ہماری سپورٹ ٹیم سے رابطہ کریں</h2>
+<p>کسی بھی مسئلے کی صورت میں یا تجاویز دینے کے لیے آپ ہم سے چوبیس گھنٹے رابطہ کر سکتے ہیں:</p>
+<ul>
+  <li><strong>عام سپورٹ:</strong> support@scribddownloader.app</li>
+  <li><strong>ٹیکنیکل سوالات:</strong> tech@scribddownloader.app</li>
+  <li><strong>کاپی رائٹ ڈیسک:</strong> dmca@scribddownloader.app</li>
+</ul>`,
+      switcherSections: [],
+      showInHeader: true,
+      showInFooter: true,
+      status: 'published',
+      seoTitle: 'ہم سے رابطہ کریں — ScribdDownloader',
+      seoDescription: 'ہماری ٹیکنیکل ٹیم سے Scribd ڈاؤنلوڈنگ کی مدد کے لیے رابطہ کریں۔'
     },
     {
       id: 'page-privacy-en',

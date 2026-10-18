@@ -40,6 +40,7 @@ import {
 } from '../lib/cmsStore';
 import WordPressEditor from './WordPressEditor';
 import YoastSeoPanel from './YoastSeoPanel';
+import LanguageVariationsSidebar from './LanguageVariationsSidebar';
 
 interface AdminDashboardProps {
   cms: CmsStoreState;
@@ -339,6 +340,184 @@ export default function AdminDashboard({
       pages: cms.pages.filter((p) => p.id !== pageId)
     });
     triggerSavedToast('Custom page removed.');
+  };
+
+  // Language Variations Hub Handlers for Custom Pages
+  const handleCreatePageVariation = (targetLangCode: string) => {
+    if (!editingPage) return;
+    const exists = cms.pages.some((p) => p.id === editingPage.id);
+    const updatedPages = exists
+      ? cms.pages.map((p) => (p.id === editingPage.id ? editingPage : p))
+      : [...cms.pages, editingPage];
+
+    const targetLangObj = cms.languages.find((l) => l.code === targetLangCode);
+    const langSuffix = targetLangCode.toLowerCase();
+    const baseSlug = editingPage.slug.replace(new RegExp(`-${editingPage.lang}$`), '');
+    const newSlug = `${baseSlug}-${langSuffix}`;
+
+    const newVariation: CustomPageItem = {
+      ...editingPage,
+      id: `page-${Date.now()}-${langSuffix}`,
+      slug: newSlug,
+      lang: targetLangCode,
+      translationGroupId: editingPage.translationGroupId,
+      title: `${editingPage.title} (${targetLangObj?.name || targetLangCode.toUpperCase()})`,
+      seoTitle: editingPage.seoTitle ? `${editingPage.seoTitle} (${targetLangCode.toUpperCase()})` : '',
+      seoDescription: editingPage.seoDescription || '',
+      switcherSections: (editingPage.switcherSections || []).map((sec, i) => ({
+        ...sec,
+        id: `pg-tab-${Date.now()}-${i}`
+      }))
+    };
+
+    const finalPages = [...updatedPages, newVariation];
+    onUpdateCms({ ...cms, pages: finalPages });
+    setEditingPage(newVariation);
+    setActivePageSwitcherIdx(0);
+    triggerSavedToast(`Created ${targetLangObj?.flag || ''} ${targetLangObj?.name || targetLangCode} variation! Switched editor.`);
+  };
+
+  const handleSwitchPageVariation = (targetPageId: string) => {
+    if (!editingPage) return;
+    const exists = cms.pages.some((p) => p.id === editingPage.id);
+    const updatedPages = exists
+      ? cms.pages.map((p) => (p.id === editingPage.id ? editingPage : p))
+      : [...cms.pages, editingPage];
+
+    const target = updatedPages.find((p) => p.id === targetPageId);
+    if (target) {
+      onUpdateCms({ ...cms, pages: updatedPages });
+      setEditingPage(target);
+      setActivePageSwitcherIdx(0);
+      triggerSavedToast(`Switched to ${target.lang.toUpperCase()} variation: "${target.title}"`);
+    }
+  };
+
+  const handleCloneAllMissingPageVariations = () => {
+    if (!editingPage) return;
+    const exists = cms.pages.some((p) => p.id === editingPage.id);
+    const currentPagesList = exists
+      ? cms.pages.map((p) => (p.id === editingPage.id ? editingPage : p))
+      : [...cms.pages, editingPage];
+
+    const existingLangs = new Set(
+      currentPagesList
+        .filter((p) => p.translationGroupId === editingPage.translationGroupId)
+        .map((p) => p.lang.toLowerCase())
+    );
+
+    const missing = cms.languages.filter(
+      (l) => l.enabled && !existingLangs.has(l.code.toLowerCase())
+    );
+
+    if (missing.length === 0) {
+      triggerSavedToast('All enabled languages already have variations for this page!');
+      return;
+    }
+
+    const newVariations: CustomPageItem[] = missing.map((lang, idx) => {
+      const baseSlug = editingPage.slug.replace(new RegExp(`-${editingPage.lang}$`), '');
+      return {
+        ...editingPage,
+        id: `page-${Date.now()}-${idx}-${lang.code}`,
+        slug: `${baseSlug}-${lang.code}`,
+        lang: lang.code,
+        translationGroupId: editingPage.translationGroupId,
+        title: `${editingPage.title} (${lang.name})`,
+        switcherSections: (editingPage.switcherSections || []).map((sec, i) => ({
+          ...sec,
+          id: `pg-tab-${Date.now()}-${idx}-${i}`
+        }))
+      };
+    });
+
+    const finalPages = [...currentPagesList, ...newVariations];
+    onUpdateCms({ ...cms, pages: finalPages });
+    triggerSavedToast(`Cloned to ${missing.length} missing language variations!`);
+  };
+
+  // Language Variations Hub Handlers for Blog Posts
+  const handleCreatePostVariation = (targetLangCode: string) => {
+    if (!editingPost) return;
+    const exists = cms.blogPosts.some((p) => p.id === editingPost.id);
+    const updatedPosts = exists
+      ? cms.blogPosts.map((p) => (p.id === editingPost.id ? editingPost : p))
+      : [editingPost, ...cms.blogPosts];
+
+    const targetLangObj = cms.languages.find((l) => l.code === targetLangCode);
+    const langSuffix = targetLangCode.toLowerCase();
+    const baseSlug = editingPost.slug.replace(new RegExp(`-${editingPost.lang}$`), '');
+    const newSlug = `${baseSlug}-${langSuffix}`;
+
+    const newVariation: BlogPostItem = {
+      ...editingPost,
+      id: `post-${Date.now()}-${langSuffix}`,
+      slug: newSlug,
+      lang: targetLangCode,
+      translationGroupId: editingPost.translationGroupId,
+      title: `${editingPost.title} (${targetLangObj?.name || targetLangCode.toUpperCase()})`,
+      seoTitle: editingPost.seoTitle ? `${editingPost.seoTitle} (${targetLangCode.toUpperCase()})` : '',
+      seoDescription: editingPost.seoDescription || ''
+    };
+
+    const finalPosts = [newVariation, ...updatedPosts];
+    onUpdateCms({ ...cms, blogPosts: finalPosts });
+    setEditingPost(newVariation);
+    triggerSavedToast(`Created ${targetLangObj?.flag || ''} ${targetLangObj?.name || targetLangCode} blog variation!`);
+  };
+
+  const handleSwitchPostVariation = (targetPostId: string) => {
+    if (!editingPost) return;
+    const exists = cms.blogPosts.some((p) => p.id === editingPost.id);
+    const updatedPosts = exists
+      ? cms.blogPosts.map((p) => (p.id === editingPost.id ? editingPost : p))
+      : [editingPost, ...cms.blogPosts];
+
+    const target = updatedPosts.find((p) => p.id === targetPostId);
+    if (target) {
+      onUpdateCms({ ...cms, blogPosts: updatedPosts });
+      setEditingPost(target);
+      triggerSavedToast(`Switched to ${target.lang.toUpperCase()} blog post.`);
+    }
+  };
+
+  const handleCloneAllMissingPostVariations = () => {
+    if (!editingPost) return;
+    const exists = cms.blogPosts.some((p) => p.id === editingPost.id);
+    const currentPostsList = exists
+      ? cms.blogPosts.map((p) => (p.id === editingPost.id ? editingPost : p))
+      : [editingPost, ...cms.blogPosts];
+
+    const existingLangs = new Set(
+      currentPostsList
+        .filter((p) => p.translationGroupId === editingPost.translationGroupId)
+        .map((p) => p.lang.toLowerCase())
+    );
+
+    const missing = cms.languages.filter(
+      (l) => l.enabled && !existingLangs.has(l.code.toLowerCase())
+    );
+
+    if (missing.length === 0) {
+      triggerSavedToast('All enabled languages already have variations for this post!');
+      return;
+    }
+
+    const newVariations: BlogPostItem[] = missing.map((lang, idx) => {
+      const baseSlug = editingPost.slug.replace(new RegExp(`-${editingPost.lang}$`), '');
+      return {
+        ...editingPost,
+        id: `post-${Date.now()}-${idx}-${lang.code}`,
+        slug: `${baseSlug}-${lang.code}`,
+        lang: lang.code,
+        translationGroupId: editingPost.translationGroupId,
+        title: `${editingPost.title} (${lang.name})`
+      };
+    });
+
+    const finalPosts = [...newVariations, ...currentPostsList];
+    onUpdateCms({ ...cms, blogPosts: finalPosts });
+    triggerSavedToast(`Cloned to ${missing.length} missing language variations!`);
   };
 
   // Page Multi-Content Switcher Tab Helpers
@@ -1601,7 +1780,9 @@ export default function AdminDashboard({
               </div>
 
               {editingPage ? (
-                <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-6">
+                <div className="flex flex-col xl:flex-row gap-6 items-start">
+                  {/* Left: Main Custom Page Editor */}
+                  <div className="flex-1 min-w-0 p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-6 w-full">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <label className="text-xs font-semibold text-slate-700 block mb-1">
@@ -1849,6 +2030,34 @@ export default function AdminDashboard({
                     </button>
                   </div>
                 </div>
+
+                {/* Right: Language Variations Sidebar Hub */}
+                <div className="w-full xl:w-80 shrink-0 xl:sticky xl:top-6">
+                  <LanguageVariationsSidebar
+                    currentLang={editingPage.lang}
+                    currentId={editingPage.id}
+                    currentTitle={editingPage.title}
+                    translationGroupId={editingPage.translationGroupId}
+                    languages={cms.languages}
+                    allGroupItems={cms.pages
+                      .filter((p) => p.translationGroupId === editingPage.translationGroupId)
+                      .map((p) => ({
+                        id: p.id,
+                        lang: p.lang,
+                        title: p.title,
+                        slug: p.slug,
+                        contentHtml: p.contentHtml,
+                        focusKeyphrase: p.focusKeyphrase,
+                        seoTitle: p.seoTitle,
+                        seoDescription: p.seoDescription
+                      }))}
+                    itemType="Page"
+                    onSwitchItem={handleSwitchPageVariation}
+                    onCreateVariation={handleCreatePageVariation}
+                    onCloneAllMissing={handleCloneAllMissingPageVariations}
+                  />
+                </div>
+              </div>
               ) : (
                 <div className="border border-slate-200 rounded-lg overflow-hidden">
                   <table className="w-full text-left border-collapse">
@@ -2281,7 +2490,9 @@ export default function AdminDashboard({
               </div>
 
               {editingPost ? (
-                <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-5">
+                <div className="flex flex-col xl:flex-row gap-6 items-start">
+                  {/* Left: Main Blog Post Editor */}
+                  <div className="flex-1 min-w-0 p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-5 w-full">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-slate-700 block mb-1">
@@ -2432,6 +2643,34 @@ export default function AdminDashboard({
                     </button>
                   </div>
                 </div>
+
+                {/* Right: Language Variations Sidebar Hub */}
+                <div className="w-full xl:w-80 shrink-0 xl:sticky xl:top-6">
+                  <LanguageVariationsSidebar
+                    currentLang={editingPost.lang}
+                    currentId={editingPost.id}
+                    currentTitle={editingPost.title}
+                    translationGroupId={editingPost.translationGroupId}
+                    languages={cms.languages}
+                    allGroupItems={cms.blogPosts
+                      .filter((p) => p.translationGroupId === editingPost.translationGroupId)
+                      .map((p) => ({
+                        id: p.id,
+                        lang: p.lang,
+                        title: p.title,
+                        slug: p.slug,
+                        contentHtml: p.contentHtml,
+                        focusKeyphrase: p.focusKeyphrase,
+                        seoTitle: p.seoTitle,
+                        seoDescription: p.seoDescription
+                      }))}
+                    itemType="Blog Post"
+                    onSwitchItem={handleSwitchPostVariation}
+                    onCreateVariation={handleCreatePostVariation}
+                    onCloneAllMissing={handleCloneAllMissingPostVariations}
+                  />
+                </div>
+              </div>
               ) : (
                 <div className="border border-slate-200 rounded-lg overflow-hidden">
                   <table className="w-full text-left border-collapse">

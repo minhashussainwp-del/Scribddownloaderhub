@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan to fix the 1-page detection issue on Vercel so 100% of pages (Page 1 to Page N) are detected and compiled at the top just like the full preview below, while providing both the Direct Multi-Page PDF Compiler and Unlocked Viewer PDF Export.",
-  "updatedAt": "2026-10-18T00:32:41.807099633Z",
+  "summary": "Implementation plan for Sidebar Page Language Variations & Frontend Switcher Integration: adds a dedicated right-hand variations sidebar in the Page & Blog editor to seamlessly create, clone, switch, and manage multi-language versions of any page, connected with the frontend language switcher with fallback notice.",
+  "updatedAt": "2026-10-18T03:55:32.398286988Z",
   "requestFeedback": true,
   "userFacing": true
 }
