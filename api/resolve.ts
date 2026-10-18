@@ -24,6 +24,20 @@ interface ScribdDocumentData {
   sourceMethod: 'live-scribd' | 'embed-parser' | 'proxy-bridge' | 'client-zero-block';
 }
 
+const BROWSER_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+
+function buildGoogleTranslateEdgeUrl(scribdUrl: string): string {
+  try {
+    const u = new URL(scribdUrl);
+    const gHost = u.hostname.replace(/\./g, '-') + '.translate.goog';
+    const sep = u.search ? '&' : '?';
+    return `https://${gHost}${u.pathname}${u.search}${sep}_x_tr_sl=auto&_x_tr_tl=en&_x_tr_hl=en`;
+  } catch {
+    return scribdUrl;
+  }
+}
+
 function parseScribdInput(input: string): { id: string; slugTitle?: string } | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
@@ -230,24 +244,27 @@ function parseEmbedHtmlAssets(embedHtml: string): {
     }
   }
 
-  const inlinePageRegex = /<div[^>]+id=["']outer_page_(\d+)["'][^>]*>([\s\S]*?)(?=<div[^>]+id=["']outer_page_\d+["']|<script|$)/gi;
+  const inlinePageRegex = /<div[^>]+id=["']outer_page_(\d+)["'][^>]*>([\s\S]*?)(?=<div[^>]+id=["']outer_page_\d+["']|<div[^>]+id=["']autogen_id_|<\/body>|$)/gi;
   while ((m = inlinePageRegex.exec(unescaped)) !== null) {
     const pNum = parseInt(m[1], 10);
     const blockHtml = m[2];
-    const parsedInline = parseJsonpPageContent(blockHtml, assetPrefix);
     const existing = pagesMap.get(pNum) || {};
-    if (!existing.imageUrl && parsedInline.imageUrls.length > 0) {
-      existing.imageUrl = parsedInline.imageUrls[0];
-    }
-    if (parsedInline.text && parsedInline.text.length > 5) {
-      existing.inlineText = parsedInline.text;
+    if (!existing.jsonpUrl) {
+      const parsedInline = parseJsonpPageContent(blockHtml, assetPrefix);
+      if (!existing.imageUrl && parsedInline.imageUrls.length > 0) {
+        existing.imageUrl = parsedInline.imageUrls[0];
+      }
+      if (parsedInline.text && parsedInline.text.length > 5) {
+        existing.inlineText = parsedInline.text;
+      }
     }
     pagesMap.set(pNum, existing);
   }
 
   let declaredPageCount = 0;
   const pageCountMatches = [
-    unescaped.match(/"page_count"\s*:\s*(\d+)/i),
+    unescaped.match(/"page_count"\s*:\s*(\d+)\s*,\s*"page_dimensions"/i),
+    unescaped.match(/"wordDocument"\s*:\s*\{[\s\S]*?"page_count"\s*:\s*(\d+)/i),
     unescaped.match(/"total_pages"\s*:\s*(\d+)/i),
     unescaped.match(/page_count\s*=\s*(\d+)/i),
     unescaped.match(/total_pages\s*:\s*(\d+)/i)
@@ -286,7 +303,7 @@ async function resolveScribdServerless(rawInput: string): Promise<ScribdDocument
   const { id, slugTitle } = parsed;
   const docUrl = `https://www.scribd.com/document/${id}`;
   const defaultAccessKey = 'key-fFexxf7r1bzEfWu3HKwf';
-  const targetEmbedUrl = `https://www.scribd.com/embeds/${id}/content`;
+  const targetEmbedUrl = `https://www.scribd.com/embeds/${id}/content?start_page=1&view_mode=scroll&access_key=${defaultAccessKey}`;
 
   let title = slugTitle || `Scribd Document #${id}`;
   const author = 'Scribd Contributor';
@@ -297,63 +314,91 @@ async function resolveScribdServerless(rawInput: string): Promise<ScribdDocument
   const pages: ScribdPage[] = [];
 
   const docMetaPromise = (async () => {
-    try {
-      const resp = await fetch(docUrl, {
-        headers: {
-          'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
-          'Accept': 'text/html,application/xhtml+xml'
-        },
-        signal: AbortSignal.timeout(3500)
-      });
-      if (!resp.ok) return null;
-      const html = await resp.text();
+    const parseMeta = (html: string) => {
+      if (!html || html.includes('<title>Client Challenge</title>')) return null;
       const titleMatch =
         html.match(/property=["']og:title["']\s+content=["']([^"']+)["']/i) ||
         html.match(/<title>([^<]+)<\/title>/i);
       const descMatch = html.match(/property=["']og:description["']\s+content=["']([^"']+)["']/i);
       const imgMatch = html.match(/property=["']og:image["']\s+content=["']([^"']+)["']/i);
-      const pageCountMatch = html.match(/"page_count"\s*:\s*(\d+)/i);
+      const wordDocPageCountMatch =
+        html.match(/"page_count"\s*:\s*(\d+)\s*,\s*"page_dimensions"/i) ||
+        html.match(/"wordDocument"\s*:\s*\{[\s\S]*?"page_count"\s*:\s*(\d+)/i);
       const formatIdMatch = html.match(/"format_id"\s*:\s*"([a-zA-Z0-9_-]+)"/i);
 
       return {
         title: titleMatch?.[1] ? decodeHtmlEntities(titleMatch[1].replace(/\s*\|\s*Scribd.*$/i, '')) : undefined,
         description: descMatch?.[1] ? decodeHtmlEntities(descMatch[1]) : undefined,
         thumbnailUrl: imgMatch?.[1],
-        pageCount: pageCountMatch?.[1] ? parseInt(pageCountMatch[1], 10) : 0,
+        pageCount: wordDocPageCountMatch?.[1] ? parseInt(wordDocPageCountMatch[1], 10) : 0,
         formatId: formatIdMatch?.[1]
       };
+    };
+
+    try {
+      const gDocUrl = buildGoogleTranslateEdgeUrl(docUrl);
+      const html = await Promise.any([
+        fetch(docUrl, {
+          headers: {
+            'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+            'Accept': 'text/html,application/xhtml+xml'
+          },
+          signal: AbortSignal.timeout(4000)
+        }).then(async (r) => {
+          if (!r.ok) throw new Error('status');
+          const t = await r.text();
+          if (t.includes('<title>Client Challenge</title>')) throw new Error('challenge');
+          return t;
+        }),
+        fetch(gDocUrl, {
+          headers: { 'User-Agent': BROWSER_UA },
+          signal: AbortSignal.timeout(5000)
+        }).then(async (r) => {
+          if (!r.ok) throw new Error('status');
+          const t = await r.text();
+          if (t.includes('<title>Client Challenge</title>')) throw new Error('challenge');
+          return t;
+        })
+      ]);
+      return parseMeta(html);
     } catch {
       return null;
     }
   })();
 
   const embedHtmlPromise = (async () => {
-    const uas = ['WhatsApp/2.23.20.0', 'WhatsApp/2.24.12.78 A'];
-    for (const ua of uas) {
-      try {
-        const resp = await fetch(targetEmbedUrl, {
-          headers: {
-            'User-Agent': ua,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9'
-          },
-          signal: AbortSignal.timeout(4500)
-        });
-        if (!resp.ok) continue;
-        const text = await resp.text();
-        if (
-          text.length > 200 &&
-          !text.includes('<title>Client Challenge</title>') &&
-          !text.includes('Document deleted by owner') &&
-          (text.includes('outer_page_') || text.includes('docManager.addPage') || text.includes('.jsonp'))
-        ) {
-          return text;
-        }
-      } catch {
-        // try next UA
+    const gEmbedUrl = buildGoogleTranslateEdgeUrl(targetEmbedUrl);
+    const tryFetch = async (url: string, ua: string) => {
+      const resp = await fetch(url, {
+        headers: {
+          'User-Agent': ua,
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9'
+        },
+        signal: AbortSignal.timeout(5500)
+      });
+      if (!resp.ok) throw new Error(`Status ${resp.status}`);
+      const text = await resp.text();
+      if (
+        text.length < 200 ||
+        text.includes('<title>Client Challenge</title>') ||
+        text.includes('Document deleted by owner') ||
+        (!text.includes('outer_page_') && !text.includes('docManager.addPage') && !text.includes('.jsonp'))
+      ) {
+        throw new Error('Invalid or challenged embed HTML');
       }
+      return text;
+    };
+
+    try {
+      return await Promise.any([
+        tryFetch(targetEmbedUrl, 'WhatsApp/2.23.20.0'),
+        tryFetch(targetEmbedUrl, 'WhatsApp/2.24.12.78 A'),
+        tryFetch(gEmbedUrl, BROWSER_UA)
+      ]);
+    } catch {
+      return null;
     }
-    return null;
   })();
 
   const [docMeta, embedHtml] = await Promise.all([docMetaPromise, embedHtmlPromise]);
@@ -380,10 +425,15 @@ async function resolveScribdServerless(rawInput: string): Promise<ScribdDocument
       pageCount = parsedAssets.pageCount;
     }
 
+    for (let p = 1; p <= pageCount; p++) {
+      if (!parsedAssets.pagesMap.has(p)) {
+        parsedAssets.pagesMap.set(p, {});
+      }
+    }
+
     const sortedPageNums = Array.from(parsedAssets.pagesMap.keys()).sort((a, b) => a - b);
 
-    // Pre-fetch up to 36 JSONP manifests directly from `html.scribdassets.com` (~39ms each)
-    const fastSlice = sortedPageNums.slice(0, 36);
+    const fastSlice = sortedPageNums.slice(0, 60);
     await Promise.all(
       fastSlice.map(async (pNum) => {
         const entry = parsedAssets.pagesMap.get(pNum)!;
@@ -436,7 +486,7 @@ async function resolveScribdServerless(rawInput: string): Promise<ScribdDocument
     description,
     pageCount: Math.max(pageCount, pages.length),
     wordCount: pages.length * 180,
-    embedUrl: `${targetEmbedUrl}?start_page=1&view_mode=scroll&access_key=${defaultAccessKey}`,
+    embedUrl: targetEmbedUrl,
     originalUrl: docUrl,
     category: 'Scribd Document',
     accessKey: defaultAccessKey,

@@ -10,7 +10,29 @@ const DOC_METADATA_UAS = [
   'Twitterbot/1.0'
 ];
 
+const BROWSER_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+
+function buildGoogleTranslateEdgeUrl(scribdUrl: string): string {
+  try {
+    const u = new URL(scribdUrl);
+    const gHost = u.hostname.replace(/\./g, '-') + '.translate.goog';
+    const sep = u.search ? '&' : '?';
+    return `https://${gHost}${u.pathname}${u.search}${sep}_x_tr_sl=auto&_x_tr_tl=en&_x_tr_hl=en`;
+  } catch {
+    return scribdUrl;
+  }
+}
+
 function getStealthHeaders(targetUrl = '') {
+  if (targetUrl.includes('translate.goog')) {
+    return {
+      'User-Agent': BROWSER_UA,
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9'
+    };
+  }
+
   const isEmbedOrJsonp =
     targetUrl.includes('/embeds/') ||
     targetUrl.includes('.jsonp') ||
@@ -47,36 +69,41 @@ export default async function handler(req: any, res: any) {
       'https://html.scribdassets.com/'
     );
     const parsedUrl = new URL(normalizedUrl);
-    const allowedHosts = ['scribd.com', 'scribdassets.com', 'wsrv.nl'];
+    const allowedHosts = ['scribd.com', 'scribdassets.com', 'wsrv.nl', 'translate.goog'];
     const isAllowed = allowedHosts.some((host) => parsedUrl.hostname.endsWith(host));
     if (!isAllowed) {
       return res.status(403).json({ error: 'Host not permitted by asset proxy' });
     }
 
-    const upstream = await fetch(normalizedUrl, {
-      headers: getStealthHeaders(normalizedUrl),
-      signal: AbortSignal.timeout(8500)
-    });
-
-    if (!upstream.ok) {
-      return res.status(upstream.status).json({ error: `Upstream responded with ${upstream.status}` });
-    }
-
-    const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
-    const arrayBuffer = await upstream.arrayBuffer();
-    const buf = Buffer.from(arrayBuffer);
-
-    if (contentType.includes('text/html') && buf.length < 6000) {
-      const sampleText = buf.toString('utf8');
-      if (sampleText.includes('<title>Client Challenge</title>') || sampleText.includes('/_fs-ch-')) {
-        return res.status(503).json({ error: 'Fastly Client Challenge encountered' });
+    const fetchUpstream = async (urlToFetch: string) => {
+      const r = await fetch(urlToFetch, {
+        headers: getStealthHeaders(urlToFetch),
+        signal: AbortSignal.timeout(7000)
+      });
+      if (!r.ok) throw new Error(`Status ${r.status}`);
+      const contentType = r.headers.get('content-type') || 'application/octet-stream';
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (contentType.includes('text/html') && buf.length < 6000) {
+        const sampleText = buf.toString('utf8');
+        if (sampleText.includes('<title>Client Challenge</title>') || sampleText.includes('/_fs-ch-')) {
+          throw new Error('Fastly Client Challenge encountered');
+        }
       }
+      return { contentType, buf };
+    };
+
+    let result: { contentType: string; buf: Buffer };
+    if (parsedUrl.hostname.endsWith('scribd.com')) {
+      const gEdgeUrl = buildGoogleTranslateEdgeUrl(normalizedUrl);
+      result = await Promise.any([fetchUpstream(normalizedUrl), fetchUpstream(gEdgeUrl)]);
+    } else {
+      result = await fetchUpstream(normalizedUrl);
     }
 
-    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Type', result.contentType);
     res.setHeader('Cache-Control', 'public, max-age=86400');
-    return res.status(200).send(buf);
+    return res.status(200).send(result.buf);
   } catch (err: any) {
-    return res.status(500).json({ error: err?.message || 'Proxy fetch failed' });
+    return res.status(503).json({ error: err?.message || 'Proxy fetch failed' });
   }
 }

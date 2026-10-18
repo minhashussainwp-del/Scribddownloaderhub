@@ -38,10 +38,21 @@ const DOC_METADATA_UAS = [
   'Twitterbot/1.0'
 ];
 
+const BROWSER_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+
 const DOCUMENT_CACHE = new Map<string, ScribdDocumentData>();
 const IMAGE_BYTE_CACHE = new Map<string, { bytes: Uint8Array; isPng: boolean }>();
 
 export function getRandomHeaders(targetUrl = '') {
+  if (targetUrl.includes('translate.goog')) {
+    return {
+      'User-Agent': BROWSER_UA,
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9'
+    };
+  }
+
   const isEmbedOrJsonp =
     targetUrl.includes('/embeds/') ||
     targetUrl.includes('.jsonp') ||
@@ -56,6 +67,22 @@ export function getRandomHeaders(targetUrl = '') {
     'Accept-Language': 'en-US,en;q=0.9',
     'Cache-Control': 'no-cache'
   };
+}
+
+/**
+ * Converts a `https://www.scribd.com/...` URL into Google Translate's Edge Proxy URL
+ * (`https://www-scribd-com.translate.goog/...`), which fetches from Google's own IPs
+ * and bypasses Fastly datacenter challenges on Vercel AWS Lambda.
+ */
+export function buildGoogleTranslateEdgeUrl(scribdUrl: string): string {
+  try {
+    const u = new URL(scribdUrl);
+    const gHost = u.hostname.replace(/\./g, '-') + '.translate.goog';
+    const sep = u.search ? '&' : '?';
+    return `https://${gHost}${u.pathname}${u.search}${sep}_x_tr_sl=auto&_x_tr_tl=en&_x_tr_hl=en`;
+  } catch {
+    return scribdUrl;
+  }
 }
 
 export function isValidScribdPayload(text: string, targetUrl = ''): boolean {
@@ -135,16 +162,16 @@ function stripHtmlTags(html: string): string {
 }
 
 /**
- * ULTRA-FAST FETCHER:
- * - For `scribdassets.com` (`.jsonp` manifests): fetches DIRECTLY first (~39ms, `Access-Control-Allow-Origin: *`)!
- * - For `scribd.com/embeds/`: uses `WhatsApp/2.23.20.0` on server or `/api/proxy-asset` in browser.
+ * ULTRA-FAST MULTI-TUNNEL FETCHER:
+ * 1. For `scribdassets.com` (`.jsonp` manifests): fetches DIRECTLY (~39ms, `Access-Control-Allow-Origin: *`).
+ * 2. For `scribd.com/embeds/`: races `WhatsApp/2.23.20.0` alongside Google Translate Edge Tunnel
+ *    (`www-scribd-com.translate.goog`) so Vercel AWS datacenter IPs are never blocked by Fastly!
  */
-export async function fetchWithAntiBlockFallback(targetUrl: string, timeoutMs = 5000): Promise<string | null> {
+export async function fetchWithAntiBlockFallback(targetUrl: string, timeoutMs = 6000): Promise<string | null> {
   const cleanTarget = targetUrl
     .replace(/^http:\/\/html\.scribd\.com\//i, 'https://html.scribdassets.com/')
     .replace(/^http:\/\//i, 'https://');
 
-  // Fast path: `scribdassets.com` has `Access-Control-Allow-Origin: *` and zero bot blocks (~39ms!)
   if (cleanTarget.includes('scribdassets.com')) {
     try {
       const directResp = await fetch(cleanTarget, {
@@ -155,12 +182,12 @@ export async function fetchWithAntiBlockFallback(targetUrl: string, timeoutMs = 
         if (text && text.length >= 40) return text;
       }
     } catch {
-      // Fall through to proxy fallback
+      // Fall through
     }
   }
 
-  const attemptDirectWithUa = async (ua: string): Promise<string> => {
-    const resp = await fetch(cleanTarget, {
+  const attemptDirectWithUa = async (urlToFetch: string, ua: string): Promise<string> => {
+    const resp = await fetch(urlToFetch, {
       headers: {
         'User-Agent': ua,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -192,9 +219,15 @@ export async function fetchWithAntiBlockFallback(targetUrl: string, timeoutMs = 
 
   if (typeof window !== 'undefined') {
     candidates.push(attemptViaProxy(`/api/proxy-asset?url=${encodeURIComponent(cleanTarget)}`));
+    const gEdgeUrl = buildGoogleTranslateEdgeUrl(cleanTarget);
+    candidates.push(attemptViaProxy(`/api/proxy-asset?url=${encodeURIComponent(gEdgeUrl)}`));
   } else {
-    candidates.push(attemptDirectWithUa('WhatsApp/2.23.20.0'));
-    candidates.push(attemptDirectWithUa('WhatsApp/2.24.12.78 A'));
+    candidates.push(attemptDirectWithUa(cleanTarget, 'WhatsApp/2.23.20.0'));
+    candidates.push(attemptDirectWithUa(cleanTarget, 'WhatsApp/2.24.12.78 A'));
+    if (cleanTarget.includes('scribd.com')) {
+      const gEdgeUrl = buildGoogleTranslateEdgeUrl(cleanTarget);
+      candidates.push(attemptDirectWithUa(gEdgeUrl, BROWSER_UA));
+    }
   }
 
   try {
@@ -290,6 +323,7 @@ export function parseEmbedHtmlAssets(embedHtml: string): {
 
   const pagesMap = new Map<number, { jsonpUrl?: string; imageUrl?: string; inlineText?: string }>();
 
+  // Pattern 0: Explicit `docManager.addPage({ pageNum: N, ... contentUrl: "..." })` blocks
   const addPageBlockRegex = /docManager\.addPage\(\{([\s\S]*?)\}\)/gi;
   let m: RegExpExecArray | null;
   while ((m = addPageBlockRegex.exec(unescaped)) !== null) {
@@ -313,6 +347,7 @@ export function parseEmbedHtmlAssets(embedHtml: string): {
     pagesMap.set(pNum, existing);
   }
 
+  // Pattern 1: Full JSONP URLs anywhere in the HTML
   const jsonpFullRegex = /https?:\/\/[^"'\s\\<>()]+\.(?:scribdassets\.com|scribd\.com)\/[^"'\s\\<>()]+\/pages\/(\d+)-[a-zA-Z0-9]+\.jsonp/gi;
   while ((m = jsonpFullRegex.exec(unescaped)) !== null) {
     const pNum = parseInt(m[1], 10);
@@ -325,6 +360,7 @@ export function parseEmbedHtmlAssets(embedHtml: string): {
     }
   }
 
+  // Pattern 2: Full Image URLs explicitly present in the embed HTML
   const imgFullRegex = /https?:\/\/[^"'\s\\<>()]+\.(?:scribdassets\.com|scribd\.com)\/[^"'\s\\<>()]+\/images\/(\d+)-[a-zA-Z0-9]+\.(?:jpg|jpeg|png)/gi;
   while ((m = imgFullRegex.exec(unescaped)) !== null) {
     const pNum = parseInt(m[1], 10);
@@ -335,6 +371,7 @@ export function parseEmbedHtmlAssets(embedHtml: string): {
     pagesMap.set(pNum, existing);
   }
 
+  // Pattern 3: Relative paths when assetPrefix is known
   if (assetPrefix) {
     const base = assetPrefix.replace(/\/$/, '');
     const relJsonpRegex = /\/?pages\/(\d+)-([a-zA-Z0-9]+)\.jsonp/gi;
@@ -357,24 +394,29 @@ export function parseEmbedHtmlAssets(embedHtml: string): {
     }
   }
 
-  const inlinePageRegex = /<div[^>]+id=["']outer_page_(\d+)["'][^>]*>([\s\S]*?)(?=<div[^>]+id=["']outer_page_\d+["']|<script|$)/gi;
+  // Pattern 4: Extract inline page HTML for pages (`<div class="outer_page ..." id="outer_page_N">...`)
+  // Only extract inline HTML for pages that do not have a lazy-loaded `.jsonp` URL (typically pages 1..3)
+  const inlinePageRegex = /<div[^>]+id=["']outer_page_(\d+)["'][^>]*>([\s\S]*?)(?=<div[^>]+id=["']outer_page_\d+["']|<div[^>]+id=["']autogen_id_|<\/body>|$)/gi;
   while ((m = inlinePageRegex.exec(unescaped)) !== null) {
     const pNum = parseInt(m[1], 10);
     const blockHtml = m[2];
-    const parsedInline = parseJsonpPageContent(blockHtml, assetPrefix);
     const existing = pagesMap.get(pNum) || {};
-    if (!existing.imageUrl && parsedInline.imageUrls.length > 0) {
-      existing.imageUrl = parsedInline.imageUrls[0];
-    }
-    if (parsedInline.text && parsedInline.text.length > 5) {
-      existing.inlineText = parsedInline.text;
+    if (!existing.jsonpUrl) {
+      const parsedInline = parseJsonpPageContent(blockHtml, assetPrefix);
+      if (!existing.imageUrl && parsedInline.imageUrls.length > 0) {
+        existing.imageUrl = parsedInline.imageUrls[0];
+      }
+      if (parsedInline.text && parsedInline.text.length > 5) {
+        existing.inlineText = parsedInline.text;
+      }
     }
     pagesMap.set(pNum, existing);
   }
 
   let declaredPageCount = 0;
   const pageCountMatches = [
-    unescaped.match(/"page_count"\s*:\s*(\d+)/i),
+    unescaped.match(/"page_count"\s*:\s*(\d+)\s*,\s*"page_dimensions"/i),
+    unescaped.match(/"wordDocument"\s*:\s*\{[\s\S]*?"page_count"\s*:\s*(\d+)/i),
     unescaped.match(/"total_pages"\s*:\s*(\d+)/i),
     unescaped.match(/page_count\s*=\s*(\d+)/i),
     unescaped.match(/total_pages\s*:\s*(\d+)/i)
@@ -419,7 +461,7 @@ export async function resolveScribdDocument(rawInput: string): Promise<ScribdDoc
 
   const docUrl = `https://www.scribd.com/document/${id}`;
   const defaultAccessKey = 'key-fFexxf7r1bzEfWu3HKwf';
-  const targetEmbedUrl = `https://www.scribd.com/embeds/${id}/content`;
+  const targetEmbedUrl = `https://www.scribd.com/embeds/${id}/content?start_page=1&view_mode=scroll&access_key=${defaultAccessKey}`;
 
   let title = slugTitle || `Scribd Document #${id}`;
   const author = 'Scribd Contributor';
@@ -431,37 +473,60 @@ export async function resolveScribdDocument(rawInput: string): Promise<ScribdDoc
   const sourceMethod: ScribdDocumentData['sourceMethod'] = 'embed-parser';
 
   const docMetaPromise = (async () => {
-    try {
-      const resp = await fetch(docUrl, {
-        headers: {
-          'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
-          'Accept': 'text/html,application/xhtml+xml'
-        },
-        signal: AbortSignal.timeout(3500)
-      });
-      if (!resp.ok) return null;
-      const html = await resp.text();
+    const parseMetaHtml = (html: string) => {
+      if (!html || html.includes('<title>Client Challenge</title>')) return null;
       const titleMatch =
         html.match(/property=["']og:title["']\s+content=["']([^"']+)["']/i) ||
         html.match(/<title>([^<]+)<\/title>/i);
       const descMatch = html.match(/property=["']og:description["']\s+content=["']([^"']+)["']/i);
       const imgMatch = html.match(/property=["']og:image["']\s+content=["']([^"']+)["']/i);
-      const pageCountMatch = html.match(/"page_count"\s*:\s*(\d+)/i);
+      // Match `"page_count":N,"page_dimensions"` first so sidebar recommendations are never matched!
+      const wordDocPageCountMatch =
+        html.match(/"page_count"\s*:\s*(\d+)\s*,\s*"page_dimensions"/i) ||
+        html.match(/"wordDocument"\s*:\s*\{[\s\S]*?"page_count"\s*:\s*(\d+)/i);
       const formatIdMatch = html.match(/"format_id"\s*:\s*"([a-zA-Z0-9_-]+)"/i);
 
       return {
         title: titleMatch?.[1] ? decodeHtmlEntities(titleMatch[1].replace(/\s*\|\s*Scribd.*$/i, '')) : undefined,
         description: descMatch?.[1] ? decodeHtmlEntities(descMatch[1]) : undefined,
         thumbnailUrl: imgMatch?.[1],
-        pageCount: pageCountMatch?.[1] ? parseInt(pageCountMatch[1], 10) : 0,
+        pageCount: wordDocPageCountMatch?.[1] ? parseInt(wordDocPageCountMatch[1], 10) : 0,
         formatId: formatIdMatch?.[1]
       };
+    };
+
+    try {
+      const gDocUrl = buildGoogleTranslateEdgeUrl(docUrl);
+      const html = await Promise.any([
+        fetch(docUrl, {
+          headers: {
+            'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+            'Accept': 'text/html,application/xhtml+xml'
+          },
+          signal: AbortSignal.timeout(4000)
+        }).then(async (r) => {
+          if (!r.ok) throw new Error('status');
+          const t = await r.text();
+          if (t.includes('<title>Client Challenge</title>')) throw new Error('challenge');
+          return t;
+        }),
+        fetch(gDocUrl, {
+          headers: { 'User-Agent': BROWSER_UA },
+          signal: AbortSignal.timeout(5000)
+        }).then(async (r) => {
+          if (!r.ok) throw new Error('status');
+          const t = await r.text();
+          if (t.includes('<title>Client Challenge</title>')) throw new Error('challenge');
+          return t;
+        })
+      ]);
+      return parseMetaHtml(html);
     } catch {
       return null;
     }
   })();
 
-  const embedHtmlPromise = fetchWithAntiBlockFallback(targetEmbedUrl, 5000);
+  const embedHtmlPromise = fetchWithAntiBlockFallback(targetEmbedUrl, 6000);
   const [docMeta, embedHtml] = await Promise.all([docMetaPromise, embedHtmlPromise]);
 
   if (docMeta) {
@@ -486,11 +551,16 @@ export async function resolveScribdDocument(rawInput: string): Promise<ScribdDoc
       pageCount = parsedAssets.pageCount;
     }
 
+    // Ensure all pages up to `pageCount` exist in `pagesMap`
+    for (let p = 1; p <= pageCount; p++) {
+      if (!parsedAssets.pagesMap.has(p)) {
+        parsedAssets.pagesMap.set(p, {});
+      }
+    }
+
     const sortedPageNums = Array.from(parsedAssets.pagesMap.keys()).sort((a, b) => a - b);
 
-    // Pre-resolve the first 36 pages directly from `html.scribdassets.com` (~39ms each)
-    // so `/api/resolve` always finishes in < 1.2s and never triggers a Vercel serverless timeout!
-    const fastServerSlice = sortedPageNums.slice(0, 36);
+    const fastServerSlice = sortedPageNums.slice(0, 60);
     await Promise.all(
       fastServerSlice.map(async (pNum) => {
         const entry = parsedAssets.pagesMap.get(pNum)!;
@@ -507,7 +577,7 @@ export async function resolveScribdDocument(rawInput: string): Promise<ScribdDoc
               }
             }
           } catch {
-            // Remaining pages are resolved in parallel on the client
+            // Client also resolves any remaining JSONP directly from scribdassets.com
           }
         }
       })
@@ -542,7 +612,7 @@ export async function resolveScribdDocument(rawInput: string): Promise<ScribdDoc
     description,
     pageCount: Math.max(pageCount, pages.length),
     wordCount: pages.length * 180,
-    embedUrl: `${targetEmbedUrl}?start_page=1&view_mode=scroll&access_key=${defaultAccessKey}`,
+    embedUrl: targetEmbedUrl,
     originalUrl: docUrl,
     category: 'Scribd Document',
     accessKey: defaultAccessKey,

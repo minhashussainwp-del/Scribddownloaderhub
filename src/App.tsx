@@ -29,7 +29,8 @@ import {
   parseJsonpPageContent,
   fetchPageImageBytes,
   generateDocumentPdf,
-  isValidScribdPayload
+  isValidScribdPayload,
+  buildGoogleTranslateEdgeUrl
 } from './lib/scribdCore';
 import {
   CmsStoreState,
@@ -281,11 +282,15 @@ export default function App() {
       }
     }
 
+    const gTarget = cleanTarget.includes('scribd.com')
+      ? buildGoogleTranslateEdgeUrl(cleanTarget)
+      : cleanTarget;
+
     const buildUrl = (node: RelayNode) => {
       if (node === 'direct-proxy') return `/api/proxy-asset?url=${encodeURIComponent(cleanTarget)}`;
-      if (node === 'allorigins') return `https://api.allorigins.win/raw?url=${encodeURIComponent(cleanTarget)}`;
-      if (node === 'codetabs') return `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(cleanTarget)}`;
-      return `https://corsproxy.io/?${encodeURIComponent(cleanTarget)}`;
+      if (node === 'allorigins') return `https://api.allorigins.win/raw?url=${encodeURIComponent(gTarget)}`;
+      if (node === 'codetabs') return `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(gTarget)}`;
+      return `https://corsproxy.io/?${encodeURIComponent(gTarget)}`;
     };
 
     const attempt = async (node: RelayNode): Promise<string> => {
@@ -314,7 +319,7 @@ export default function App() {
     docId: string,
     slugTitle?: string
   ): Promise<ScribdDocumentData> => {
-    const cleanEmbedUrl = `https://www.scribd.com/embeds/${docId}/content`;
+    const cleanEmbedUrl = `https://www.scribd.com/embeds/${docId}/content?start_page=1&view_mode=scroll&access_key=key-fFexxf7r1bzEfWu3HKwf`;
     const embedHtml = await raceViaRelayNodes(cleanEmbedUrl, 6000);
 
     if (!embedHtml) {
@@ -349,7 +354,7 @@ export default function App() {
       description: `Complete unlocked Scribd document (#${docId})`,
       pageCount: Math.max(pageCount, pages.length),
       wordCount: pages.length * 180,
-      embedUrl: `${cleanEmbedUrl}?start_page=1&view_mode=scroll&access_key=key-fFexxf7r1bzEfWu3HKwf`,
+      embedUrl: cleanEmbedUrl,
       originalUrl: `https://www.scribd.com/document/${docId}`,
       category: 'Scribd Document',
       assetPrefix,
@@ -406,8 +411,12 @@ export default function App() {
       try {
         resolvedDoc = await Promise.any([
           serverPromise.then((doc) => {
-            if (doc.pages.length <= 1 && !doc.pages[0]?.imageUrl && !doc.pages[0]?.jsonpUrl) {
-              throw new Error('Single unverified page');
+            if (
+              doc.pages.length <= 1 &&
+              !doc.pages[0]?.jsonpUrl &&
+              doc.pages[0]?.text?.startsWith('Page 1 —')
+            ) {
+              throw new Error('Single unverified stub page');
             }
             return doc;
           }),
@@ -766,7 +775,7 @@ export default function App() {
                     )}
                   </button>
 
-                  {/* Button 2: Download PDF */}
+                  {/* Button 2: Direct Multi-Page PDF Compiler */}
                   <button
                     type="button"
                     onClick={handleDownloadPdf}
@@ -785,10 +794,28 @@ export default function App() {
                     ) : (
                       <>
                         <Download className="w-4 h-4" />
-                        <span>{t.downloadPdfBtn}</span>
+                        <span>
+                          {currentDoc && allPagesReady
+                            ? `${t.downloadPdfBtn} (${currentDoc.pages.length} Pages)`
+                            : t.downloadPdfBtn}
+                        </span>
                       </>
                     )}
                   </button>
+
+                  {/* Button 3: Unlocked Viewer Full-Document PDF Export */}
+                  {currentDoc && (
+                    <a
+                      href={currentDoc.embedUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-3 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center justify-center gap-1.5 cursor-pointer"
+                      title="Open the unlocked multi-page vector stream and press Ctrl+P / Cmd+P → Save as PDF"
+                    >
+                      <Maximize2 className="w-4 h-4" />
+                      <span>Save Full Preview PDF</span>
+                    </a>
+                  )}
                 </form>
 
                 {errorMsg && (
@@ -812,7 +839,7 @@ export default function App() {
                           {allPagesReady
                             ? `All ${currentDoc.pages.length} of ${currentDoc.pages.length} Pages Verified${
                                 fetchDurationMs ? ` in ${(fetchDurationMs / 1000).toFixed(2)}s` : ''
-                              } — Non-Blank Original Content Ready`
+                              } — Multi-Page PDF Ready`
                             : `Scanning & Verifying Pages: ${scanProgress?.scanned ?? 0} of ${
                                 scanProgress?.total ?? currentDoc.pages.length
                               }`}
@@ -868,29 +895,29 @@ export default function App() {
                 {/* Quick Example Links & Advanced Anti-IP-Block Toggle */}
                 <div className="mt-4 pt-3.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium text-slate-700">Example Scribd links:</span>
+                    <span className="font-medium text-slate-700">Live Multi-Page Examples:</span>
                     <button
                       type="button"
                       onClick={() => {
-                        const link1 = 'https://www.scribd.com/document/436350615/Sample-PDF-Document';
+                        const link1 = 'https://www.scribd.com/document/991278283/2026-Grade-12-Investigation-Term-1';
                         setUrlInput(link1);
                         handleFetchDocument(link1);
                       }}
                       className="text-blue-600 hover:underline font-mono cursor-pointer"
                     >
-                      scribd.com/document/436350615
+                      scribd.com/document/991278283 (9 Pages)
                     </button>
                     <span>·</span>
                     <button
                       type="button"
                       onClick={() => {
-                        const link2 = 'https://www.scribd.com/doc/254565028/Cheat-Sheet';
+                        const link2 = 'https://www.scribd.com/document/894860339/Document-2';
                         setUrlInput(link2);
                         handleFetchDocument(link2);
                       }}
                       className="text-blue-600 hover:underline font-mono cursor-pointer"
                     >
-                      scribd.com/doc/254565028
+                      scribd.com/document/894860339 (14 Pages)
                     </button>
                   </div>
 

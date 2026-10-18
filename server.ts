@@ -7,6 +7,7 @@ import {
   generateDocumentPdf,
   getCuratedSamples,
   getRandomHeaders,
+  buildGoogleTranslateEdgeUrl,
   ScribdDocumentData
 } from './src/lib/scribdCore';
 
@@ -37,41 +38,47 @@ async function startServer() {
         'https://html.scribdassets.com/'
       );
       const parsedUrl = new URL(normalizedUrl);
-      const allowedHosts = ['scribd.com', 'scribdassets.com', 'wsrv.nl'];
+      const allowedHosts = ['scribd.com', 'scribdassets.com', 'wsrv.nl', 'translate.goog'];
       const isAllowed = allowedHosts.some((h) => parsedUrl.hostname.endsWith(h));
       if (!isAllowed) {
         res.status(403).json({ error: 'Domain not allowed' });
         return;
       }
 
-      const upstream = await fetch(normalizedUrl, {
-        headers: getRandomHeaders(normalizedUrl),
-        signal: AbortSignal.timeout(12000)
-      });
-
-      if (!upstream.ok) {
-        res.status(upstream.status).json({ error: `Upstream returned ${upstream.status}` });
-        return;
-      }
-
-      const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
-      const buffer = Buffer.from(await upstream.arrayBuffer());
-
-      if (contentType.includes('text/html') && buffer.length < 6000) {
-        const sampleText = buffer.toString('utf8');
-        if (sampleText.includes('<title>Client Challenge</title>') || sampleText.includes('/_fs-ch-')) {
-          res.status(503).json({ error: 'Fastly Client Challenge encountered' });
-          return;
+      const fetchUpstream = async (urlToFetch: string) => {
+        const upstream = await fetch(urlToFetch, {
+          headers: getRandomHeaders(urlToFetch),
+          signal: AbortSignal.timeout(8000)
+        });
+        if (!upstream.ok) {
+          throw new Error(`Upstream returned ${upstream.status}`);
         }
+        const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
+        const buffer = Buffer.from(await upstream.arrayBuffer());
+        if (contentType.includes('text/html') && buffer.length < 6000) {
+          const sampleText = buffer.toString('utf8');
+          if (sampleText.includes('<title>Client Challenge</title>') || sampleText.includes('/_fs-ch-')) {
+            throw new Error('Fastly Client Challenge encountered');
+          }
+        }
+        return { contentType, buffer };
+      };
+
+      let result: { contentType: string; buffer: Buffer };
+      if (parsedUrl.hostname.endsWith('scribd.com')) {
+        const gEdgeUrl = buildGoogleTranslateEdgeUrl(normalizedUrl);
+        result = await Promise.any([fetchUpstream(normalizedUrl), fetchUpstream(gEdgeUrl)]);
+      } else {
+        result = await fetchUpstream(normalizedUrl);
       }
 
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Type', result.contentType);
       res.setHeader('Cache-Control', 'public, max-age=86400');
-      res.send(buffer);
+      res.send(result.buffer);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Asset proxy error';
-      res.status(500).json({ error: msg });
+      res.status(503).json({ error: msg });
     }
   });
 
