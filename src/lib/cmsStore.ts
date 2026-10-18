@@ -6,6 +6,7 @@ export interface LanguageConfig {
   dir: 'ltr' | 'rtl';
   isDefault: boolean;
   enabled: boolean;
+  regions?: string[];
 }
 
 export interface ContentSwitcherSectionItem {
@@ -47,6 +48,15 @@ export interface AdSlotConfig {
   dimensions: string;
   enabled: boolean;
   htmlCode: string;
+  placementZone?:
+    | 'header-leaderboard'
+    | 'below-downloader-banner'
+    | 'above-viewer-banner'
+    | 'in-article-tutorial'
+    | 'blog-top-banner'
+    | 'page-top-banner'
+    | 'footer-sticky-banner'
+    | 'custom-shortcode';
 }
 
 export interface BlogPostItem {
@@ -93,6 +103,37 @@ export interface SeoLanguageConfig {
   customHeadHtml: string;
 }
 
+export interface ShortcodeItem {
+  id: string;
+  tag: string;
+  name: string;
+  description: string;
+  htmlCode: string;
+  enabled: boolean;
+  updatedAt: string;
+}
+
+export interface SiteReadingAndLayoutSettings {
+  homepageMode: 'default-downloader' | 'static-page';
+  homepageStaticPageId: string;
+  showDownloaderOnStaticHome: boolean;
+  blogPageMode: 'default-blog' | 'static-page';
+  blogStaticPageId: string;
+  showPostsListBelowStaticBlogPage: boolean;
+  showLanguageDropdownInHeader: boolean;
+  showImportantPagesDropdownInHeader: boolean;
+  showLanguageDropdownInFooter: boolean;
+  autoDetectBrowserLanguage: boolean;
+  brandTopTitle: string;
+  brandBottomTitle: string;
+  showContactButtonInHeader: boolean;
+  contactButtonText: string;
+  contactButtonPageSlug: string;
+  brandLogoText: string;
+  footerTagline: string;
+  footerCopyrightText: string;
+}
+
 export interface CmsStoreState {
   activeLanguage: string;
   languages: LanguageConfig[];
@@ -100,10 +141,324 @@ export interface CmsStoreState {
   ads: AdSlotConfig[];
   blogPosts: BlogPostItem[];
   pages: CustomPageItem[];
+  shortcodes: ShortcodeItem[];
   seo: Record<string, SeoLanguageConfig>;
+  readingAndLayout: SiteReadingAndLayoutSettings;
+  seededV4?: boolean;
+}
+
+export const DEFAULT_READING_AND_LAYOUT: SiteReadingAndLayoutSettings = {
+  homepageMode: 'default-downloader',
+  homepageStaticPageId: 'page-custom-home-en',
+  showDownloaderOnStaticHome: false,
+  blogPageMode: 'default-blog',
+  blogStaticPageId: 'page-faq-en',
+  showPostsListBelowStaticBlogPage: true,
+  showLanguageDropdownInHeader: true,
+  showImportantPagesDropdownInHeader: true,
+  showLanguageDropdownInFooter: true,
+  autoDetectBrowserLanguage: true,
+  brandTopTitle: 'Scribd',
+  brandBottomTitle: 'Downloader',
+  showContactButtonInHeader: true,
+  contactButtonText: 'Contact Us',
+  contactButtonPageSlug: 'contact-us',
+  brandLogoText: 'ScribdDownloader',
+  footerTagline:
+    'Free online Scribd PDF downloader & full-page document viewer powered by 24x parallel extraction.',
+  footerCopyrightText: '© 2026 ScribdDownloader. All rights reserved.'
+};
+
+export const WORLD_LANGUAGE_PRESETS: LanguageConfig[] = [
+  { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸', dir: 'ltr', isDefault: false, enabled: true, regions: ['US', 'GB', 'CA', 'AU', 'NZ'] },
+  { code: 'ur', name: 'Urdu / Roman Urdu', nativeName: 'اردو / Roman', flag: '🇵🇰', dir: 'ltr', isDefault: false, enabled: true, regions: ['PK'] },
+  { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', flag: '🇮🇳', dir: 'ltr', isDefault: false, enabled: true, regions: ['IN'] },
+  { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸', dir: 'ltr', isDefault: false, enabled: true, regions: ['ES', 'MX', 'AR', 'CO', 'CL', 'PE'] },
+  { code: 'ar', name: 'Arabic', nativeName: 'العربية', flag: '🇸🇦', dir: 'rtl', isDefault: false, enabled: true, regions: ['SA', 'AE', 'EG', 'QA', 'KW', 'MA'] },
+  { code: 'pt', name: 'Portuguese', nativeName: 'Português', flag: '🇧🇷', dir: 'ltr', isDefault: false, enabled: true, regions: ['BR', 'PT'] },
+  { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷', dir: 'ltr', isDefault: false, enabled: true, regions: ['FR', 'BE', 'CH', 'SN'] },
+  { code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia', flag: '🇮🇩', dir: 'ltr', isDefault: false, enabled: true, regions: ['ID'] },
+  { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', flag: '🇹🇷', dir: 'ltr', isDefault: false, enabled: true, regions: ['TR'] },
+  { code: 'de', name: 'German', nativeName: 'Deutsch', flag: '🇩🇪', dir: 'ltr', isDefault: false, enabled: true, regions: ['DE', 'AT'] },
+  { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', flag: '🇧🇩', dir: 'ltr', isDefault: false, enabled: true, regions: ['BD'] },
+  { code: 'ru', name: 'Russian', nativeName: 'Русский', flag: '🇷🇺', dir: 'ltr', isDefault: false, enabled: true, regions: ['RU', 'KZ'] },
+  { code: 'zh', name: 'Chinese', nativeName: '中文', flag: '🇨🇳', dir: 'ltr', isDefault: false, enabled: true, regions: ['CN', 'TW', 'HK', 'SG'] },
+  { code: 'fa', name: 'Persian / Farsi', nativeName: 'فارسی', flag: '🇮🇷', dir: 'rtl', isDefault: false, enabled: true, regions: ['IR', 'AF'] },
+  { code: 'it', name: 'Italian', nativeName: 'Italiano', flag: '🇮🇹', dir: 'ltr', isDefault: false, enabled: true, regions: ['IT'] },
+  { code: 'ms', name: 'Malay', nativeName: 'Bahasa Melayu', flag: '🇲🇾', dir: 'ltr', isDefault: false, enabled: true, regions: ['MY'] }
+];
+
+const TIMEZONE_TO_REGION_MAP: Record<string, { region: string; langCode: string }> = {
+  'Asia/Karachi': { region: 'PK', langCode: 'ur' },
+  'Asia/Kolkata': { region: 'IN', langCode: 'hi' },
+  'Asia/Calcutta': { region: 'IN', langCode: 'hi' },
+  'Asia/Dhaka': { region: 'BD', langCode: 'bn' },
+  'Asia/Riyadh': { region: 'SA', langCode: 'ar' },
+  'Asia/Dubai': { region: 'AE', langCode: 'ar' },
+  'Asia/Qatar': { region: 'QA', langCode: 'ar' },
+  'Asia/Kuwait': { region: 'KW', langCode: 'ar' },
+  'Africa/Cairo': { region: 'EG', langCode: 'ar' },
+  'Asia/Tehran': { region: 'IR', langCode: 'fa' },
+  'Asia/Jakarta': { region: 'ID', langCode: 'id' },
+  'Asia/Kuala_Lumpur': { region: 'MY', langCode: 'ms' },
+  'Europe/Istanbul': { region: 'TR', langCode: 'tr' },
+  'Europe/Madrid': { region: 'ES', langCode: 'es' },
+  'America/Mexico_City': { region: 'MX', langCode: 'es' },
+  'America/Bogota': { region: 'CO', langCode: 'es' },
+  'America/Argentina/Buenos_Aires': { region: 'AR', langCode: 'es' },
+  'America/Sao_Paulo': { region: 'BR', langCode: 'pt' },
+  'Europe/Lisbon': { region: 'PT', langCode: 'pt' },
+  'Europe/Paris': { region: 'FR', langCode: 'fr' },
+  'Europe/Berlin': { region: 'DE', langCode: 'de' },
+  'Europe/Rome': { region: 'IT', langCode: 'it' },
+  'Europe/Moscow': { region: 'RU', langCode: 'ru' },
+  'Asia/Shanghai': { region: 'CN', langCode: 'zh' }
+};
+
+export const USER_LANG_OVERRIDE_KEY = 'scribddownloader_user_lang_override_v1';
+
+/**
+ * Automatically detects the user's browser language and geographical region (via navigator.languages + timezone)
+ * and matches it against the languages currently added & enabled in the Admin Panel.
+ */
+export function detectBrowserAndRegionLanguage(
+  languages: LanguageConfig[],
+  preferRegionOverGenericEnglish = true
+): {
+  matchedCode: string;
+  browserLocale: string;
+  detectedRegion: string;
+  matchSource: 'browser-lang' | 'region-timezone' | 'locale-region' | 'default';
+} {
+  const enabled = languages.filter((l) => l.enabled);
+  const fallbackDefault =
+    enabled.find((l) => l.isDefault)?.code || enabled[0]?.code || 'en';
+
+  if (typeof window === 'undefined' || enabled.length === 0) {
+    return {
+      matchedCode: fallbackDefault,
+      browserLocale: 'en-US',
+      detectedRegion: 'US',
+      matchSource: 'default'
+    };
+  }
+
+  const browserLocales =
+    Array.isArray(navigator.languages) && navigator.languages.length > 0
+      ? navigator.languages
+      : [navigator.language || 'en-US'];
+
+  const primaryLocale = browserLocales[0] || 'en-US';
+  const localeParts = primaryLocale.replace('_', '-').split('-');
+  const primaryLangSubtag = (localeParts[0] || 'en').toLowerCase();
+  let detectedRegion = (localeParts[1] || '').toUpperCase();
+
+  let tzName = '';
+  try {
+    tzName = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  } catch {
+    tzName = '';
+  }
+
+  const tzInfo = TIMEZONE_TO_REGION_MAP[tzName];
+  if (tzInfo && (!detectedRegion || detectedRegion === 'US' || detectedRegion === 'GB')) {
+    detectedRegion = tzInfo.region;
+  }
+
+  // 1. If primary browser language is specific (not generic 'en') and is enabled in Admin Panel
+  if (primaryLangSubtag !== 'en') {
+    const directMatch = enabled.find((l) => l.code.toLowerCase() === primaryLangSubtag);
+    if (directMatch) {
+      return {
+        matchedCode: directMatch.code,
+        browserLocale: primaryLocale,
+        detectedRegion: detectedRegion || 'GLOBAL',
+        matchSource: 'browser-lang'
+      };
+    }
+  }
+
+  // 2. Check if any secondary browser language in navigator.languages is a non-English enabled language
+  for (const loc of browserLocales) {
+    const sub = (loc.split('-')[0] || '').toLowerCase();
+    if (sub && sub !== 'en') {
+      const found = enabled.find((l) => l.code.toLowerCase() === sub);
+      if (found) {
+        return {
+          matchedCode: found.code,
+          browserLocale: loc,
+          detectedRegion: detectedRegion || 'GLOBAL',
+          matchSource: 'browser-lang'
+        };
+      }
+    }
+  }
+
+  // 3. Check if locale region (e.g. en-PK, en-IN, en-SA) or Timezone Region matches an enabled regional language
+  if (preferRegionOverGenericEnglish && detectedRegion) {
+    const regionLangMatch = enabled.find(
+      (l) =>
+        l.code !== 'en' &&
+        Array.isArray(l.regions) &&
+        l.regions.map((r) => r.toUpperCase()).includes(detectedRegion)
+    );
+    if (regionLangMatch) {
+      return {
+        matchedCode: regionLangMatch.code,
+        browserLocale: primaryLocale,
+        detectedRegion,
+        matchSource: 'locale-region'
+      };
+    }
+
+    if (tzInfo) {
+      const tzLangMatch = enabled.find(
+        (l) => l.code.toLowerCase() === tzInfo.langCode.toLowerCase()
+      );
+      if (tzLangMatch) {
+        return {
+          matchedCode: tzLangMatch.code,
+          browserLocale: primaryLocale,
+          detectedRegion: tzInfo.region,
+          matchSource: 'region-timezone'
+        };
+      }
+    }
+  }
+
+  // 4. Check if primary language ('en' or any other) is enabled
+  const primaryMatch = enabled.find((l) => l.code.toLowerCase() === primaryLangSubtag);
+  if (primaryMatch) {
+    return {
+      matchedCode: primaryMatch.code,
+      browserLocale: primaryLocale,
+      detectedRegion: detectedRegion || 'US',
+      matchSource: 'browser-lang'
+    };
+  }
+
+  return {
+    matchedCode: fallbackDefault,
+    browserLocale: primaryLocale,
+    detectedRegion: detectedRegion || 'US',
+    matchSource: 'default'
+  };
 }
 
 export const CMS_STORAGE_KEY = 'scribddownloader_cms_v3';
+
+export const DEFAULT_SHORTCODES: ShortcodeItem[] = [
+  {
+    id: 'sc-scribd-downloader',
+    tag: 'scribd_downloader',
+    name: 'Live Scribd PDF Downloader Tool (Interactive Widget)',
+    description:
+      'Embeds the complete interactive Scribd URL Fetcher, Multi-Page Detector, PDF Compiler & Live Document Viewer into any Custom Page, Blog Post, or Tab.',
+    enabled: true,
+    updatedAt: '2026-10-18',
+    htmlCode: `<div data-scribd-downloader-widget="true" style="background:#ffffff;border:2px solid #2563eb;border-radius:14px;padding:24px;margin:20px 0;box-shadow:0 10px 25px -5px rgba(37,99,235,0.12);">
+  <div style="text-align:center;max-width:600px;margin:0 auto 16px auto;">
+    <span style="display:inline-block;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">[scribd_downloader] · Live Interactive Tool</span>
+    <h3 style="margin:0 0 6px 0;font-size:20px;font-weight:800;color:#0f172a;">Scribd Document &amp; PDF Downloader</h3>
+    <p style="margin:0;font-size:13px;color:#475569;">Paste any Scribd document URL below to verify all pages (Page 1 to Page N), preview the document, and download the complete multi-page PDF.</p>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;background:#f8fafc;border:1px solid #e2e8f0;padding:14px;border-radius:10px;">
+    <input type="text" readonly placeholder="https://www.scribd.com/document/991278283/..." style="flex:1;min-width:220px;padding:10px 14px;border:1px solid #cbd5e1;border-radius:8px;font-family:monospace;font-size:12px;background:#fff;color:#334155;" />
+    <span style="background:#0f172a;color:#fff;font-size:12px;font-weight:700;padding:10px 18px;border-radius:8px;">⚡ Fetch All Pages</span>
+    <span style="background:#2563eb;color:#fff;font-size:12px;font-weight:700;padding:10px 18px;border-radius:8px;">⬇ Download PDF (All Pages)</span>
+  </div>
+</div>`
+  },
+  {
+    id: 'sc-cta-banner',
+    tag: 'custom_cta_banner',
+    name: 'High-Conversion Downloader CTA Banner',
+    description: 'Dark slate & blue gradient promotional banner with action button.',
+    enabled: true,
+    updatedAt: '2026-10-18',
+    htmlCode: `<div style="background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 100%);color:#ffffff;padding:28px;border-radius:14px;margin:20px 0;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;box-shadow:0 10px 25px -5px rgba(15,23,42,0.25);">
+  <div style="max-width:540px;">
+    <span style="display:inline-block;background:#2563eb;color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">24x Parallel Engine</span>
+    <h3 style="margin:0 0 6px 0;font-size:20px;font-weight:800;color:#ffffff;">Unlock &amp; Download Full Scribd PDFs Instantly</h3>
+    <p style="margin:0;font-size:13px;color:#cbd5e1;line-height:1.5;">Paste any document link at the top of the page, verify all pages (Page 1 to Page N), and save the complete original PDF file for offline reading.</p>
+  </div>
+  <a href="#top" style="background:#10b981;color:#ffffff;font-weight:700;font-size:13px;padding:12px 22px;border-radius:10px;text-decoration:none;white-space:nowrap;">Try Downloader Now ↑</a>
+</div>`
+  },
+  {
+    id: 'sc-feature-cards',
+    tag: 'feature_cards_grid',
+    name: '3-Column Custom Feature Cards Grid',
+    description: 'Custom HTML/CSS 3-card feature highlight grid.',
+    enabled: true,
+    updatedAt: '2026-10-18',
+    htmlCode: `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin:20px 0;">
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:20px;">
+    <div style="font-size:11px;font-weight:700;color:#2563eb;text-transform:uppercase;margin-bottom:6px;">01 · Full Verification</div>
+    <h4 style="margin:0 0 8px 0;font-size:15px;font-weight:700;color:#0f172a;">All Pages Unlocked</h4>
+    <p style="margin:0;font-size:12px;color:#475569;line-height:1.6;">Detects every single page number from Page 1 to Page N before compiling your PDF file.</p>
+  </div>
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:20px;">
+    <div style="font-size:11px;font-weight:700;color:#059669;text-transform:uppercase;margin-bottom:6px;">02 · High Resolution</div>
+    <h4 style="margin:0 0 8px 0;font-size:15px;font-weight:700;color:#0f172a;">Original Quality Scans</h4>
+    <p style="margin:0;font-size:12px;color:#475569;line-height:1.6;">Extracts original raster images and digital text layers so no page is ever blurry or blank.</p>
+  </div>
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:20px;">
+    <div style="font-size:11px;font-weight:700;color:#7c3aed;text-transform:uppercase;margin-bottom:6px;">03 · Zero IP Blocks</div>
+    <h4 style="margin:0 0 8px 0;font-size:15px;font-weight:700;color:#0f172a;">Multi-Tunnel Edge Relay</h4>
+    <p style="margin:0;font-size:12px;color:#475569;line-height:1.6;">Automatically routes requests through Google Translate Edge &amp; stealth relays for 100% uptime.</p>
+  </div>
+</div>`
+  },
+  {
+    id: 'sc-support-box',
+    tag: 'custom_notice_box',
+    name: 'Custom Highlight Notice / Info Box',
+    description: 'Clean emerald notice box for announcements or instructions.',
+    enabled: true,
+    updatedAt: '2026-10-18',
+    htmlCode: `<div style="background:#ecfdf5;border-left:4px solid #10b981;border-radius:8px;padding:16px 20px;margin:16px 0;">
+  <div style="font-size:14px;font-weight:700;color:#065f46;margin-bottom:4px;">Pro Tip: Dual PDF Download Modes</div>
+  <div style="font-size:12px;color:#047857;line-height:1.5;">You can use both the direct <strong>Download PDF (N Pages)</strong> compiler button or click <strong>Save Full Preview PDF</strong> for native vector PDF export.</div>
+</div>`
+  }
+];
+
+/**
+ * Replaces [shortcode_tag] tokens in any HTML string with the corresponding custom HTML design
+ * configured in the Admin Panel Shortcodes Builder.
+ */
+export function renderShortcodesInHtml(html: string, shortcodes?: ShortcodeItem[]): string {
+  if (!html) return '';
+  const list = shortcodes && shortcodes.length > 0 ? shortcodes : DEFAULT_SHORTCODES;
+  const activeMap = new Map<string, string>();
+  for (const item of list) {
+    if (item.enabled && item.tag.trim()) {
+      activeMap.set(item.tag.trim().toLowerCase(), item.htmlCode);
+    }
+  }
+  if (activeMap.size === 0) return html;
+
+  let output = html;
+  for (let pass = 0; pass < 2; pass++) {
+    // First replace <p>[shortcode_tag]</p> so block elements inside shortcodes don't get trapped inside <p> tags
+    output = output.replace(
+      /<p[^>]*>\s*\[([a-zA-Z0-9_-]+)\]\s*<\/p>/gi,
+      (fullMatch, rawTag: string) => {
+        const key = rawTag.toLowerCase();
+        return activeMap.has(key) ? activeMap.get(key)! : fullMatch;
+      }
+    );
+
+    // Then replace inline [shortcode_tag] occurrences
+    output = output.replace(/\[([a-zA-Z0-9_-]+)\]/g, (fullMatch, rawTag: string) => {
+      const key = rawTag.toLowerCase();
+      return activeMap.has(key) ? activeMap.get(key)! : fullMatch;
+    });
+  }
+
+  return output;
+}
 
 const DEFAULT_HOME_SWITCHER_EN: ContentSwitcherSectionItem[] = [
   {
@@ -169,6 +524,7 @@ const DEFAULT_HOME_SWITCHER_UR: ContentSwitcherSectionItem[] = [
 
 export const DEFAULT_CMS_STATE: CmsStoreState = {
   activeLanguage: 'en',
+  seededV4: true,
   languages: [
     {
       code: 'en',
@@ -177,7 +533,8 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
       flag: '🇺🇸',
       dir: 'ltr',
       isDefault: true,
-      enabled: true
+      enabled: true,
+      regions: ['US', 'GB', 'CA', 'AU', 'NZ']
     },
     {
       code: 'ur',
@@ -186,7 +543,8 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
       flag: '🇵🇰',
       dir: 'ltr',
       isDefault: false,
-      enabled: true
+      enabled: true,
+      regions: ['PK']
     },
     {
       code: 'hi',
@@ -195,7 +553,8 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
       flag: '🇮🇳',
       dir: 'ltr',
       isDefault: false,
-      enabled: true
+      enabled: true,
+      regions: ['IN']
     },
     {
       code: 'es',
@@ -204,7 +563,8 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
       flag: '🇪🇸',
       dir: 'ltr',
       isDefault: false,
-      enabled: true
+      enabled: true,
+      regions: ['ES', 'MX', 'AR', 'CO', 'CL']
     },
     {
       code: 'ar',
@@ -213,7 +573,8 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
       flag: '🇸🇦',
       dir: 'rtl',
       isDefault: false,
-      enabled: true
+      enabled: true,
+      regions: ['SA', 'AE', 'EG', 'QA', 'KW']
     }
   ],
   translations: {
@@ -462,7 +823,7 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
       slug: 'about-us',
       lang: 'en',
       translationGroupId: 'group-page-about',
-      title: 'About Our PDF Downloader',
+      title: 'About Us',
       contentHtml: `<h2>Fast, Clean & Accessible Document Archiving</h2>
 <p>ScribdDownloader was engineered to provide students, educators, and professionals with an ultra-fast way to view and archive publicly shared documents for offline reading.</p>`,
       switcherSections: [
@@ -495,13 +856,33 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
       seoDescription: 'Learn more about our ultra-fast Scribd document viewer and PDF downloader.'
     },
     {
+      id: 'page-contact-en',
+      slug: 'contact-us',
+      lang: 'en',
+      translationGroupId: 'group-page-contact',
+      title: 'Contact Us',
+      contentHtml: `<h2>Contact Our Support & Technical Team</h2>
+<p>Have questions about downloading a document, reporting an issue, or partnering with us? We respond to all inquiries within 24 hours.</p>
+<ul>
+  <li><strong>General Support:</strong> support@scribddownloader.app</li>
+  <li><strong>Technical & API Inquiries:</strong> tech@scribddownloader.app</li>
+  <li><strong>Copyright & DMCA Desk:</strong> dmca@scribddownloader.app</li>
+</ul>`,
+      switcherSections: [],
+      showInHeader: true,
+      showInFooter: true,
+      status: 'published',
+      seoTitle: 'Contact Us — ScribdDownloader Support',
+      seoDescription: 'Contact our technical support team for help with Scribd PDF downloads.'
+    },
+    {
       id: 'page-privacy-en',
       slug: 'privacy-policy',
       lang: 'en',
       translationGroupId: 'group-page-privacy',
-      title: 'Privacy Policy & DMCA',
-      contentHtml: `<h2>Privacy Policy & Copyright Compliance</h2>
-<p>We do not store copyrighted files on our servers. All document resolution and PDF compilation occurs dynamically in real-time using publicly accessible embed streams.</p>`,
+      title: 'Privacy Policy',
+      contentHtml: `<h2>Privacy Policy & Data Protection</h2>
+<p>We do not store personal data or copyrighted files on our servers. All document resolution and PDF compilation occurs dynamically in real-time using publicly accessible embed streams.</p>`,
       switcherSections: [
         {
           id: 'priv-tab-1',
@@ -511,24 +892,87 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
         },
         {
           id: 'priv-tab-2',
-          tabLabel: 'DMCA Notice',
-          title: 'Intellectual Property & DMCA Takedowns',
-          contentHtml: `<p>We respect copyright laws. No document files are hosted or archived on our storage servers.</p>`
-        },
-        {
-          id: 'priv-tab-3',
-          tabLabel: 'Terms of Use',
-          title: 'Acceptable Use Guidelines',
-          contentHtml: `<p>This utility is provided strictly for personal educational and archival use on publicly accessible documents.</p>`
+          tabLabel: 'Cookies & Analytics',
+          title: 'Minimal Session Preferences',
+          contentHtml: `<p>We only use local browser storage to remember your preferred language and interface settings.</p>`
         }
       ],
-      showInHeader: false,
+      showInHeader: true,
       showInFooter: true,
       status: 'published',
-      seoTitle: 'Privacy Policy & DMCA — ScribdDownloader',
-      seoDescription: 'Read our privacy policy and copyright compliance guidelines.'
+      seoTitle: 'Privacy Policy — ScribdDownloader',
+      seoDescription: 'Read our privacy policy and zero-data-retention commitment.'
+    },
+    {
+      id: 'page-terms-en',
+      slug: 'terms-and-conditions',
+      lang: 'en',
+      translationGroupId: 'group-page-terms',
+      title: 'Terms & Conditions',
+      contentHtml: `<h2>Terms of Service & Acceptable Use</h2>
+<p>By accessing and using ScribdDownloader, you agree to use this utility strictly for personal, educational, and archival purposes on publicly shared documents.</p>
+<ul>
+  <li>Users are responsible for complying with local copyright laws regarding downloaded study materials.</li>
+  <li>Automated scraping or abuse of our proxy relay nodes is strictly prohibited.</li>
+</ul>`,
+      switcherSections: [],
+      showInHeader: true,
+      showInFooter: true,
+      status: 'published',
+      seoTitle: 'Terms & Conditions — ScribdDownloader',
+      seoDescription: 'Terms of service and acceptable use policy for ScribdDownloader.'
+    },
+    {
+      id: 'page-dmca-en',
+      slug: 'dmca-disclaimer',
+      lang: 'en',
+      translationGroupId: 'group-page-dmca',
+      title: 'DMCA Disclaimer',
+      contentHtml: `<h2>DMCA Copyright Compliance Notice</h2>
+<p>ScribdDownloader respects the intellectual property rights of authors and publishers. We do not host, store, or archive any PDF files on our servers. All content is fetched in real-time from publicly accessible URLs provided by the end user.</p>`,
+      switcherSections: [],
+      showInHeader: true,
+      showInFooter: true,
+      status: 'published',
+      seoTitle: 'DMCA Notice & Copyright Disclaimer — ScribdDownloader',
+      seoDescription: 'DMCA compliance and copyright notice for ScribdDownloader.'
+    },
+    {
+      id: 'page-faq-en',
+      slug: 'faq-help',
+      lang: 'en',
+      translationGroupId: 'group-page-faq',
+      title: 'FAQ & Help',
+      contentHtml: `<h2>Frequently Asked Questions & Troubleshooting</h2>
+<p>Find instant answers to common questions about unlocking and downloading full multi-page Scribd PDF documents.</p>
+[custom_notice_box]
+[feature_cards_grid]`,
+      switcherSections: DEFAULT_HOME_SWITCHER_EN,
+      showInHeader: true,
+      showInFooter: true,
+      status: 'published',
+      seoTitle: 'FAQ & Help Center — ScribdDownloader',
+      seoDescription: 'Frequently asked questions and troubleshooting tips for downloading Scribd PDFs.'
+    },
+    {
+      id: 'page-custom-home-en',
+      slug: 'custom-downloader-home',
+      lang: 'en',
+      translationGroupId: 'group-page-custom-home',
+      title: 'Custom Downloader Home (Static Front Page)',
+      contentHtml: `<p>[scribd_downloader]</p>
+<p>[feature_cards_grid]</p>
+<p>[custom_notice_box]</p>`,
+      switcherSections: DEFAULT_HOME_SWITCHER_EN,
+      showInHeader: false,
+      showInFooter: false,
+      status: 'published',
+      seoTitle: 'ScribdDownloader — Custom Static Homepage',
+      seoDescription: 'Download full Scribd PDFs with our custom static homepage layout.'
     }
   ],
+  shortcodes: DEFAULT_SHORTCODES,
+  readingAndLayout: DEFAULT_READING_AND_LAYOUT,
   seo: {
     en: {
       siteTitle: 'ScribdDownloader — Free Online Scribd PDF Downloader & Viewer',
@@ -620,11 +1064,82 @@ export function loadCmsState(): CmsStoreState {
   if (typeof window === 'undefined') return DEFAULT_CMS_STATE;
   try {
     const raw = localStorage.getItem(CMS_STORAGE_KEY);
-    if (!raw) return DEFAULT_CMS_STATE;
+    if (!raw) {
+      const detected = detectBrowserAndRegionLanguage(DEFAULT_CMS_STATE.languages, true);
+      return {
+        ...DEFAULT_CMS_STATE,
+        activeLanguage: detected.matchedCode
+      };
+    }
     const parsed = JSON.parse(raw);
+    const isAlreadySeededV4 = Boolean(parsed.seededV4);
+
+    let mergedShortcodes: ShortcodeItem[] = Array.isArray(parsed.shortcodes)
+      ? parsed.shortcodes
+      : DEFAULT_SHORTCODES;
+    if (!isAlreadySeededV4 && Array.isArray(parsed.shortcodes) && parsed.shortcodes.length > 0) {
+      const existingTags = new Set(
+        parsed.shortcodes.map((s: ShortcodeItem) => (s.tag || '').toLowerCase())
+      );
+      const missingDefaults = DEFAULT_SHORTCODES.filter(
+        (d) => !existingTags.has(d.tag.toLowerCase())
+      );
+      mergedShortcodes = [...missingDefaults, ...parsed.shortcodes];
+    }
+
+    let mergedPages: CustomPageItem[] = Array.isArray(parsed.pages)
+      ? parsed.pages
+      : DEFAULT_CMS_STATE.pages;
+    if (!isAlreadySeededV4 && Array.isArray(parsed.pages) && parsed.pages.length > 0) {
+      const existingSlugs = new Set(
+        parsed.pages.map((p: CustomPageItem) => (p.slug || '').toLowerCase())
+      );
+      const missingDefaultPages = DEFAULT_CMS_STATE.pages.filter(
+        (d) => !existingSlugs.has(d.slug.toLowerCase())
+      );
+      mergedPages = [...parsed.pages, ...missingDefaultPages];
+    }
+
+    const rawLanguages: LanguageConfig[] = Array.isArray(parsed.languages) && parsed.languages.length > 0
+      ? parsed.languages.map((l: LanguageConfig) => {
+          if (Array.isArray(l.regions) && l.regions.length > 0) return l;
+          const preset = WORLD_LANGUAGE_PRESETS.find((p) => p.code === l.code);
+          return { ...l, regions: preset?.regions || [l.code.toUpperCase()] };
+        })
+      : DEFAULT_CMS_STATE.languages;
+
+    const mergedReadingAndLayout: SiteReadingAndLayoutSettings = {
+      ...DEFAULT_READING_AND_LAYOUT,
+      ...(parsed.readingAndLayout || {})
+    };
+
+    const userManualOverride = localStorage.getItem(USER_LANG_OVERRIDE_KEY);
+    let resolvedActiveLanguage = parsed.activeLanguage || 'en';
+
+    if (mergedReadingAndLayout.autoDetectBrowserLanguage && !userManualOverride) {
+      const detected = detectBrowserAndRegionLanguage(rawLanguages, true);
+      resolvedActiveLanguage = detected.matchedCode;
+    } else if (
+      userManualOverride &&
+      rawLanguages.some((l) => l.code === userManualOverride && l.enabled)
+    ) {
+      resolvedActiveLanguage = userManualOverride;
+    } else if (!rawLanguages.some((l) => l.code === resolvedActiveLanguage && l.enabled)) {
+      resolvedActiveLanguage =
+        rawLanguages.find((l) => l.isDefault && l.enabled)?.code ||
+        rawLanguages.find((l) => l.enabled)?.code ||
+        'en';
+    }
+
     return {
       ...DEFAULT_CMS_STATE,
       ...parsed,
+      seededV4: true,
+      activeLanguage: resolvedActiveLanguage,
+      languages: rawLanguages,
+      pages: mergedPages,
+      shortcodes: mergedShortcodes,
+      readingAndLayout: mergedReadingAndLayout,
       translations: { ...DEFAULT_CMS_STATE.translations, ...(parsed.translations || {}) },
       seo: { ...DEFAULT_CMS_STATE.seo, ...(parsed.seo || {}) }
     };
@@ -641,3 +1156,43 @@ export function saveCmsState(state: CmsStoreState): void {
     // ignore storage quota errors
   }
 }
+
+export const ADMIN_AUTHORIZED_EMAIL = 'minhashussain.wp@gmail.com';
+export const ADMIN_AUTHORIZED_PASS = 'Shajhi@12345';
+const ADMIN_AUTH_STORAGE_KEY = 'scribddownloader_kmg_admin_session_v1';
+
+export function isAdminAuthenticatedSession(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return localStorage.getItem(ADMIN_AUTH_STORAGE_KEY) === ADMIN_AUTHORIZED_EMAIL;
+  } catch {
+    return false;
+  }
+}
+
+export function verifyAndLoginAdmin(email: string, password: string): boolean {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  const cleanPass = password || '';
+  if (
+    cleanEmail === ADMIN_AUTHORIZED_EMAIL.toLowerCase() &&
+    cleanPass === ADMIN_AUTHORIZED_PASS
+  ) {
+    try {
+      localStorage.setItem(ADMIN_AUTH_STORAGE_KEY, ADMIN_AUTHORIZED_EMAIL);
+    } catch {
+      // ignore
+    }
+    return true;
+  }
+  return false;
+}
+
+export function logoutAdminSession(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(ADMIN_AUTH_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+

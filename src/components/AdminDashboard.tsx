@@ -14,17 +14,28 @@ import {
   Code,
   Check,
   ArrowLeft,
-  Layers
+  Layers,
+  LogOut,
+  Copy,
+  Braces,
+  Sliders
 } from 'lucide-react';
 import {
   CmsStoreState,
   DEFAULT_CMS_STATE,
+  DEFAULT_READING_AND_LAYOUT,
+  SiteReadingAndLayoutSettings,
   BlogPostItem,
   CustomPageItem,
   LanguageConfig,
+  AdSlotConfig,
   UIStringTranslations,
   SeoLanguageConfig,
-  ContentSwitcherSectionItem
+  ContentSwitcherSectionItem,
+  ShortcodeItem,
+  WORLD_LANGUAGE_PRESETS,
+  detectBrowserAndRegionLanguage,
+  ADMIN_AUTHORIZED_EMAIL
 } from '../lib/cmsStore';
 import WordPressEditor from './WordPressEditor';
 
@@ -32,6 +43,7 @@ interface AdminDashboardProps {
   cms: CmsStoreState;
   onUpdateCms: (next: CmsStoreState) => void;
   onExitAdmin: () => void;
+  onLogoutAdmin: () => void;
   onPreviewBlogPost: (slug: string) => void;
   onPreviewCustomPage: (slug: string) => void;
 }
@@ -39,8 +51,10 @@ interface AdminDashboardProps {
 type AdminSection =
   | 'ads'
   | 'homepage'
+  | 'reading'
   | 'blog'
   | 'pages'
+  | 'shortcodes'
   | 'polylang'
   | 'seo';
 
@@ -48,10 +62,11 @@ export default function AdminDashboard({
   cms,
   onUpdateCms,
   onExitAdmin,
+  onLogoutAdmin,
   onPreviewBlogPost,
   onPreviewCustomPage
 }: AdminDashboardProps) {
-  const [section, setSection] = useState<AdminSection>('homepage');
+  const [section, setSection] = useState<AdminSection>('reading');
   const [editingLang, setEditingLang] = useState<string>(cms.activeLanguage || 'en');
   const [savedBanner, setSavedBanner] = useState<string | null>(null);
 
@@ -65,12 +80,29 @@ export default function AdminDashboard({
   const [editingPage, setEditingPage] = useState<CustomPageItem | null>(null);
   const [activePageSwitcherIdx, setActivePageSwitcherIdx] = useState<number>(0);
 
+  // Custom Shortcode Builder State
+  const [editingShortcode, setEditingShortcode] = useState<ShortcodeItem | null>(null);
+  const [copiedShortcodeTag, setCopiedShortcodeTag] = useState<string | null>(null);
+
   // New Language Modal Form State
   const [newLangCode, setNewLangCode] = useState('');
   const [newLangName, setNewLangName] = useState('');
   const [newLangNative, setNewLangNative] = useState('');
   const [newLangFlag, setNewLangFlag] = useState('🌐');
   const [newLangDir, setNewLangDir] = useState<'ltr' | 'rtl'>('ltr');
+  const [newLangRegions, setNewLangRegions] = useState('');
+
+  // New Ad Slot Form State
+  const [newAdName, setNewAdName] = useState('');
+  const [newAdZone, setNewAdZone] = useState<NonNullable<AdSlotConfig['placementZone']>>(
+    'header-leaderboard'
+  );
+  const [newAdDimensions, setNewAdDimensions] = useState('728×90 / Responsive');
+  const [newAdHtml, setNewAdHtml] = useState(
+    `<div style="background:#eff6ff;border:1px dashed #60a5fa;border-radius:10px;padding:16px;text-align:center;font-size:12px;color:#1e40af;">\n  <strong>Custom Ad Banner</strong> — Paste your Google AdSense, Adsterra, or custom HTML script here.\n</div>`
+  );
+
+  const detectedBrowserInfo = detectBrowserAndRegionLanguage(cms.languages, true);
 
   const triggerSavedToast = (msg: string) => {
     setSavedBanner(msg);
@@ -146,7 +178,7 @@ export default function AdminDashboard({
     onUpdateCms(next);
   };
 
-  // Ads Manager Handlers
+  // Ads Manager Handlers (Toggle, Edit, Add New Ad Slot, Delete Ad Slot)
   const handleToggleAd = (adId: string) => {
     const nextAds = cms.ads.map((a) =>
       a.id === adId ? { ...a, enabled: !a.enabled } : a
@@ -160,6 +192,56 @@ export default function AdminDashboard({
       a.id === adId ? { ...a, htmlCode } : a
     );
     onUpdateCms({ ...cms, ads: nextAds });
+  };
+
+  const handleUpdateAdMeta = (adId: string, patch: Partial<AdSlotConfig>) => {
+    const nextAds = cms.ads.map((a) =>
+      a.id === adId ? { ...a, ...patch } : a
+    );
+    onUpdateCms({ ...cms, ads: nextAds });
+  };
+
+  const handleAddAdSlot = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = newAdName.trim() || `Custom Ad Banner #${cms.ads.length + 1}`;
+    const zoneDescriptions: Record<string, string> = {
+      'header-leaderboard': 'Displayed in the top header leaderboard area across pages',
+      'below-downloader-banner': 'Displayed directly below the Fetch & Download PDF box',
+      'above-viewer-banner': 'Displayed right above the unlocked PDF viewer',
+      'in-article-tutorial': 'Displayed between the tutorial and blog section on Homepage',
+      'blog-top-banner': 'Displayed at the top of Blog Archive & Blog Articles',
+      'page-top-banner': 'Displayed inside Custom Static Pages',
+      'footer-sticky-banner': 'Displayed above the website footer across all pages',
+      'custom-shortcode': 'Embed anywhere using its shortcode tag in the WordPress Editor'
+    };
+
+    const newSlotId = `ad-slot-${Date.now().toString().slice(-5)}`;
+    const newAd: AdSlotConfig = {
+      id: newSlotId,
+      name: cleanName,
+      locationDescription: zoneDescriptions[newAdZone] || 'Custom Ad Placement',
+      dimensions: newAdDimensions.trim() || 'Responsive',
+      enabled: true,
+      htmlCode: newAdHtml,
+      placementZone: newAdZone
+    };
+
+    onUpdateCms({
+      ...cms,
+      ads: [newAd, ...cms.ads]
+    });
+    setNewAdName('');
+    triggerSavedToast(`Added new Ad Slot: "${cleanName}"`);
+  };
+
+  const handleDeleteAdSlot = (adId: string) => {
+    const target = cms.ads.find((a) => a.id === adId);
+    const nextAds = cms.ads.filter((a) => a.id !== adId);
+    onUpdateCms({
+      ...cms,
+      ads: nextAds
+    });
+    triggerSavedToast(`Deleted Ad Slot: "${target?.name || adId}"`);
   };
 
   // Blog Post Handlers
@@ -298,6 +380,11 @@ export default function AdminDashboard({
     if (!code || !newLangName.trim()) return;
     if (cms.languages.some((l) => l.code === code)) return;
 
+    const parsedRegions = newLangRegions
+      .split(',')
+      .map((r) => r.trim().toUpperCase())
+      .filter(Boolean);
+
     const newLang: LanguageConfig = {
       code,
       name: newLangName.trim(),
@@ -305,7 +392,8 @@ export default function AdminDashboard({
       flag: newLangFlag.trim() || '🌐',
       dir: newLangDir,
       isDefault: false,
-      enabled: true
+      enabled: true,
+      regions: parsedRegions.length > 0 ? parsedRegions : [code.toUpperCase()]
     };
 
     onUpdateCms({
@@ -324,7 +412,63 @@ export default function AdminDashboard({
     setNewLangCode('');
     setNewLangName('');
     setNewLangNative('');
-    triggerSavedToast(`Added language: ${newLang.name} (${newLang.code})`);
+    setNewLangRegions('');
+    triggerSavedToast(`Added language: ${newLang.name} (${newLang.code.toUpperCase()})`);
+  };
+
+  const handleQuickAddPresetLanguage = (preset: LanguageConfig) => {
+    if (cms.languages.some((l) => l.code === preset.code)) {
+      triggerSavedToast(`${preset.name} (${preset.code.toUpperCase()}) is already added.`);
+      return;
+    }
+    const newLang: LanguageConfig = {
+      ...preset,
+      isDefault: false,
+      enabled: true
+    };
+    onUpdateCms({
+      ...cms,
+      languages: [...cms.languages, newLang],
+      translations: {
+        ...cms.translations,
+        [preset.code]: cms.translations[preset.code] || { ...cms.translations.en }
+      },
+      seo: {
+        ...cms.seo,
+        [preset.code]: cms.seo[preset.code] || { ...cms.seo.en }
+      }
+    });
+    triggerSavedToast(`Added ${preset.flag} ${preset.name} (${preset.code.toUpperCase()})!`);
+  };
+
+  const handleUpdateLanguageRegions = (code: string, regionsCsv: string) => {
+    const parsedRegions = regionsCsv
+      .split(',')
+      .map((r) => r.trim().toUpperCase())
+      .filter(Boolean);
+    const nextLangs = cms.languages.map((l) =>
+      l.code === code ? { ...l, regions: parsedRegions } : l
+    );
+    onUpdateCms({ ...cms, languages: nextLangs });
+  };
+
+  const readingConfig: SiteReadingAndLayoutSettings =
+    cms.readingAndLayout || DEFAULT_READING_AND_LAYOUT;
+
+  const handleUpdateReadingAndLayout = (
+    patch: Partial<SiteReadingAndLayoutSettings>,
+    toastMsg?: string
+  ) => {
+    onUpdateCms({
+      ...cms,
+      readingAndLayout: {
+        ...readingConfig,
+        ...patch
+      }
+    });
+    if (toastMsg) {
+      triggerSavedToast(toastMsg);
+    }
   };
 
   const handleSetDefaultLanguage = (code: string) => {
@@ -350,30 +494,134 @@ export default function AdminDashboard({
     onUpdateCms({ ...cms, languages: nextLangs });
   };
 
+  const handleDeleteLanguage = (code: string) => {
+    if (cms.languages.length <= 1) {
+      triggerSavedToast('At least one language must remain active.');
+      return;
+    }
+
+    const remaining = cms.languages.filter((l) => l.code !== code);
+    const hasDefault = remaining.some((l) => l.isDefault);
+    const normalizedLangs = remaining.map((l, idx) =>
+      !hasDefault && idx === 0
+        ? { ...l, isDefault: true, enabled: true }
+        : l
+    );
+
+    const fallbackCode =
+      normalizedLangs.find((l) => l.isDefault)?.code ||
+      normalizedLangs[0].code;
+
+    const nextActive =
+      cms.activeLanguage === code ? fallbackCode : cms.activeLanguage;
+
+    if (editingLang === code) {
+      setEditingLang(fallbackCode);
+    }
+
+    onUpdateCms({
+      ...cms,
+      activeLanguage: nextActive,
+      languages: normalizedLangs
+    });
+    triggerSavedToast(`Language (${code.toUpperCase()}) deleted.`);
+  };
+
+  // Custom Shortcodes Builder Handlers
+  const handleCreateNewShortcode = () => {
+    const now = new Date().toISOString().slice(0, 10);
+    const suffix = Date.now().toString().slice(-4);
+    const newItem: ShortcodeItem = {
+      id: `sc-${Date.now()}`,
+      tag: `custom_design_${suffix}`,
+      name: `Custom Design Block #${suffix}`,
+      description: 'Custom HTML/CSS design block that can be embedded on any page or post using [shortcode].',
+      enabled: true,
+      updatedAt: now,
+      htmlCode: `<div style="background:linear-gradient(135deg,#0f172a,#1e293b);color:#ffffff;padding:24px;border-radius:12px;margin:16px 0;border:1px solid #334155;">
+  <h3 style="margin:0 0 8px 0;font-size:18px;font-weight:700;color:#38bdf8;">Custom Shortcode Design Block</h3>
+  <p style="margin:0 0 14px 0;font-size:13px;color:#cbd5e1;line-height:1.6;">Design anything here with custom HTML, inline CSS, cards, tables, or call-to-action buttons and insert it into any page using its shortcode tag.</p>
+  <a href="#top" style="display:inline-block;background:#2563eb;color:#ffffff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;text-decoration:none;">Action Button</a>
+</div>`
+    };
+    setEditingShortcode(newItem);
+  };
+
+  const handleSaveShortcode = () => {
+    if (!editingShortcode) return;
+    const sanitizedTag = editingShortcode.tag
+      .trim()
+      .replace(/^\[|\]$/g, '')
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .toLowerCase();
+
+    if (!sanitizedTag) return;
+
+    const updatedItem: ShortcodeItem = {
+      ...editingShortcode,
+      tag: sanitizedTag,
+      updatedAt: new Date().toISOString().slice(0, 10)
+    };
+
+    const list = cms.shortcodes || [];
+    const exists = list.some((s) => s.id === updatedItem.id);
+    const nextList = exists
+      ? list.map((s) => (s.id === updatedItem.id ? updatedItem : s))
+      : [updatedItem, ...list];
+
+    onUpdateCms({ ...cms, shortcodes: nextList });
+    setEditingShortcode(null);
+    triggerSavedToast(`Shortcode [${sanitizedTag}] saved & ready to use on any page!`);
+  };
+
+  const handleDeleteShortcode = (id: string) => {
+    const nextList = (cms.shortcodes || []).filter((s) => s.id !== id);
+    onUpdateCms({ ...cms, shortcodes: nextList });
+    triggerSavedToast('Shortcode deleted.');
+  };
+
+  const handleToggleShortcode = (id: string) => {
+    const nextList = (cms.shortcodes || []).map((s) =>
+      s.id === id ? { ...s, enabled: !s.enabled } : s
+    );
+    onUpdateCms({ ...cms, shortcodes: nextList });
+    triggerSavedToast('Shortcode status updated.');
+  };
+
+  const handleCopyShortcodeTag = (tag: string) => {
+    const token = `[${tag}]`;
+    navigator.clipboard.writeText(token);
+    setCopiedShortcodeTag(tag);
+    setTimeout(() => setCopiedShortcodeTag(null), 1800);
+  };
+
   const currentHomeTab = homeSwitcherList[activeHomeSwitcherIdx] || null;
 
   return (
-    <div className="min-h-[calc(100vh-65px)] flex flex-col md:flex-row bg-slate-100">
+    <div className="min-h-screen flex flex-col md:flex-row bg-slate-100">
       {/* Admin Left Sidebar */}
       <aside className="w-full md:w-64 bg-slate-900 text-slate-200 shrink-0 flex flex-col justify-between p-4">
         <div className="space-y-5">
-          <div className="px-2 pt-1 flex items-center justify-between border-b border-slate-800 pb-3">
-            <div>
-              <div className="text-sm font-bold text-white font-display">
-                WordPress CMS Admin
+          <div className="px-2 pt-1 space-y-3 border-b border-slate-800 pb-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-bold text-white font-display">
+                  KMG Admin Panel
+                </div>
+                <div className="text-[11px] text-emerald-400 font-mono truncate max-w-[160px]">
+                  {ADMIN_AUTHORIZED_EMAIL}
+                </div>
               </div>
-              <div className="text-[11px] text-slate-400">
-                Editor · Switcher · Ads · SEO
-              </div>
+              <button
+                type="button"
+                onClick={onExitAdmin}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-xs text-white rounded flex items-center gap-1 cursor-pointer"
+                title="Open Public User Website (/)"
+              >
+                <ArrowLeft className="w-3 h-3" />
+                <span>Public Site</span>
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={onExitAdmin}
-              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-xs text-white rounded flex items-center gap-1 cursor-pointer"
-            >
-              <ArrowLeft className="w-3 h-3" />
-              <span>View Site</span>
-            </button>
           </div>
 
           {/* Global Editing Language Selector inside Admin (Polylang Switcher) */}
@@ -400,11 +648,13 @@ export default function AdminDashboard({
           <nav className="space-y-1">
             {(
               [
+                { id: 'reading', label: 'Reading, Header & Footer', icon: Sliders },
                 { id: 'homepage', label: 'Homepage & Content Switcher', icon: LayoutGrid },
-                { id: 'pages', label: `Pages & Content Switcher (${cms.pages.length})`, icon: FileText },
+                { id: 'pages', label: `Pages & Important Pages (${cms.pages.length})`, icon: FileText },
+                { id: 'shortcodes', label: `Shortcodes Builder (${(cms.shortcodes || []).length})`, icon: Braces },
                 { id: 'blog', label: `Blog Posts Editor (${cms.blogPosts.length})`, icon: BookOpen },
                 { id: 'ads', label: 'Ads Placement Manager', icon: Megaphone },
-                { id: 'polylang', label: 'Polylang Languages', icon: Globe },
+                { id: 'polylang', label: `Languages (${cms.languages.length})`, icon: Globe },
                 { id: 'seo', label: 'SEO & Schema Settings', icon: Search }
               ] as const
             ).map((item) => {
@@ -418,6 +668,7 @@ export default function AdminDashboard({
                     setSection(item.id);
                     setEditingPost(null);
                     setEditingPage(null);
+                    setEditingShortcode(null);
                   }}
                   className={`w-full px-3 py-2.5 rounded-lg text-xs font-medium flex items-center gap-2.5 transition-colors cursor-pointer ${
                     isActive
@@ -433,7 +684,7 @@ export default function AdminDashboard({
           </nav>
         </div>
 
-        <div className="pt-4 border-t border-slate-800 mt-6">
+        <div className="pt-4 border-t border-slate-800 mt-6 space-y-2">
           <button
             type="button"
             onClick={() => {
@@ -445,6 +696,15 @@ export default function AdminDashboard({
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Reset Default CMS Data</span>
           </button>
+
+          <button
+            type="button"
+            onClick={onLogoutAdmin}
+            className="w-full px-3 py-2 text-xs font-semibold text-red-300 hover:text-white bg-red-950/50 hover:bg-red-600 border border-red-900/60 rounded-lg flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Sign Out (/kmg)</span>
+          </button>
         </div>
       </aside>
 
@@ -455,6 +715,665 @@ export default function AdminDashboard({
             <div className="flex items-center gap-2">
               <Check className="w-4 h-4" />
               <span>{savedBanner}</span>
+            </div>
+          </div>
+        )}
+
+        {/* 0. READING SETTINGS (STATIC HOMEPAGE & BLOG PAGE SELECTION) + HEADER & FOOTER MENUS */}
+        {section === 'reading' && (
+          <div className="space-y-6 max-w-5xl">
+            {/* WordPress Reading Settings: Manual Static Homepage & Blog Page Selection */}
+            <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-slate-200">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 font-display flex items-center gap-2">
+                    <Sliders className="w-5 h-5 text-blue-600" />
+                    <span>Reading Settings — Manual Homepage & Blog Page Selection</span>
+                  </h2>
+                  <p className="text-xs text-slate-600 mt-1">
+                    Just like WordPress Reading Settings: choose whether your Front Page and Blog Page use the default layout or any custom Static Page you created.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => triggerSavedToast('Reading, Header & Footer settings saved!')}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save Settings</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Front Page / Homepage Selector Card */}
+                <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
+                  <div className="text-xs font-mono font-bold text-blue-600 uppercase">
+                    1. Homepage (Front Page) Display
+                  </div>
+                  <div className="space-y-2.5 text-xs">
+                    <label className="flex items-start gap-2.5 cursor-pointer p-2.5 bg-white border border-slate-200 rounded-lg">
+                      <input
+                        type="radio"
+                        name="homepageMode"
+                        checked={readingConfig.homepageMode === 'default-downloader'}
+                        onChange={() =>
+                          handleUpdateReadingAndLayout(
+                            { homepageMode: 'default-downloader' },
+                            'Homepage set to Default Scribd Downloader.'
+                          )
+                        }
+                        className="mt-0.5"
+                      />
+                      <div>
+                        <div className="font-bold text-slate-900">
+                          Default Built-in Scribd Downloader Homepage
+                        </div>
+                        <div className="text-slate-500 text-[11px] mt-0.5">
+                          Shows the main Downloader hero, 3-Step Tutorial, Multi-Content Switcher, and Latest Blog Posts.
+                        </div>
+                      </div>
+                    </label>
+
+                    <label className="flex items-start gap-2.5 cursor-pointer p-2.5 bg-white border border-slate-200 rounded-lg">
+                      <input
+                        type="radio"
+                        name="homepageMode"
+                        checked={readingConfig.homepageMode === 'static-page'}
+                        onChange={() =>
+                          handleUpdateReadingAndLayout(
+                            { homepageMode: 'static-page' },
+                            'Homepage switched to Static Page mode!'
+                          )
+                        }
+                        className="mt-0.5"
+                      />
+                      <div className="flex-1">
+                        <div className="font-bold text-slate-900">
+                          A Static Page (Select Manual Homepage Below)
+                        </div>
+                        <div className="text-slate-500 text-[11px] mt-0.5">
+                          Use any Custom Page (with <code className="font-mono">[scribd_downloader]</code> or your own custom HTML/Shortcodes) as your main Front Page (<code className="font-mono">/</code>).
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+
+                  <div className="space-y-3 pt-1">
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Select Static Page for Homepage:
+                      </label>
+                      <select
+                        value={readingConfig.homepageStaticPageId}
+                        onChange={(e) =>
+                          handleUpdateReadingAndLayout(
+                            {
+                              homepageMode: 'static-page',
+                              homepageStaticPageId: e.target.value
+                            },
+                            'Selected Static Homepage updated!'
+                          )
+                        }
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-medium"
+                      >
+                        {cms.pages.map((pg) => (
+                          <option key={pg.id} value={pg.id}>
+                            {pg.title} (/p/{pg.slug} · {pg.lang.toUpperCase()})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={readingConfig.showDownloaderOnStaticHome}
+                        onChange={(e) =>
+                          handleUpdateReadingAndLayout({
+                            showDownloaderOnStaticHome: e.target.checked
+                          })
+                        }
+                      />
+                      <span>
+                        Also pin the Scribd Downloader box above the Static Page (optional if page already uses <code className="font-mono">[scribd_downloader]</code>)
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Blog Page / Posts Page Selector Card */}
+                <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
+                  <div className="text-xs font-mono font-bold text-indigo-600 uppercase">
+                    2. Blog Page (Posts Page) Display
+                  </div>
+                  <div className="space-y-2.5 text-xs">
+                    <label className="flex items-start gap-2.5 cursor-pointer p-2.5 bg-white border border-slate-200 rounded-lg">
+                      <input
+                        type="radio"
+                        name="blogPageMode"
+                        checked={readingConfig.blogPageMode === 'default-blog'}
+                        onChange={() =>
+                          handleUpdateReadingAndLayout(
+                            { blogPageMode: 'default-blog' },
+                            'Blog Page set to Default Blog Grid.'
+                          )
+                        }
+                        className="mt-0.5"
+                      />
+                      <div>
+                        <div className="font-bold text-slate-900">
+                          Default Blog Articles Grid
+                        </div>
+                        <div className="text-slate-500 text-[11px] mt-0.5">
+                          Standard blog archive listing all published articles for the active Polylang language.
+                        </div>
+                      </div>
+                    </label>
+
+                    <label className="flex items-start gap-2.5 cursor-pointer p-2.5 bg-white border border-slate-200 rounded-lg">
+                      <input
+                        type="radio"
+                        name="blogPageMode"
+                        checked={readingConfig.blogPageMode === 'static-page'}
+                        onChange={() =>
+                          handleUpdateReadingAndLayout(
+                            { blogPageMode: 'static-page' },
+                            'Blog Page switched to Static Page mode!'
+                          )
+                        }
+                        className="mt-0.5"
+                      />
+                      <div className="flex-1">
+                        <div className="font-bold text-slate-900">
+                          A Static Page (Select Manual Blog Page Below)
+                        </div>
+                        <div className="text-slate-500 text-[11px] mt-0.5">
+                          Display a custom Static Page when users open the Blog menu (<code className="font-mono">/blog</code>).
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+
+                  <div className="space-y-3 pt-1">
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Select Static Page for Blog:
+                      </label>
+                      <select
+                        value={readingConfig.blogStaticPageId}
+                        onChange={(e) =>
+                          handleUpdateReadingAndLayout(
+                            {
+                              blogPageMode: 'static-page',
+                              blogStaticPageId: e.target.value
+                            },
+                            'Selected Static Blog Page updated!'
+                          )
+                        }
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-medium"
+                      >
+                        {cms.pages.map((pg) => (
+                          <option key={pg.id} value={pg.id}>
+                            {pg.title} (/p/{pg.slug} · {pg.lang.toUpperCase()})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={readingConfig.showPostsListBelowStaticBlogPage}
+                        onChange={(e) =>
+                          handleUpdateReadingAndLayout({
+                            showPostsListBelowStaticBlogPage: e.target.checked
+                          })
+                        }
+                      />
+                      <span>
+                        Also display the Blog Articles Grid below the Static Page content
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Header & Footer Dropdowns, Important Pages, Auto Language Switcher & Branding Configuration */}
+            <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-6">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 font-display">
+                  Header & Footer Design, Auto Language Switcher & Important Pages
+                </h3>
+                <p className="text-xs text-slate-600 mt-1">
+                  Configure the stacked Brand Logo (Scribd / Downloader), Contact Us button, Browser & Region Auto-Switching Language Dropdown, and Header/Footer pages.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <label className="p-4 bg-blue-50/60 border border-blue-200 rounded-xl flex items-start gap-2.5 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={readingConfig.autoDetectBrowserLanguage}
+                    onChange={(e) =>
+                      handleUpdateReadingAndLayout(
+                        { autoDetectBrowserLanguage: e.target.checked },
+                        'Browser & Region language auto-switch updated.'
+                      )
+                    }
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <div className="font-bold text-slate-900">
+                      Auto-Switch by Browser & Region
+                    </div>
+                    <div className="text-slate-600 text-[11px] mt-0.5">
+                      Automatically switches site language based on visitor browser locale & region ({detectedBrowserInfo.browserLocale} · {detectedBrowserInfo.detectedRegion} → {detectedBrowserInfo.matchedCode.toUpperCase()}).
+                    </div>
+                  </div>
+                </label>
+
+                <label className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-start gap-2.5 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={readingConfig.showLanguageDropdownInHeader}
+                    onChange={(e) =>
+                      handleUpdateReadingAndLayout(
+                        { showLanguageDropdownInHeader: e.target.checked },
+                        'Header language dropdown updated.'
+                      )
+                    }
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <div className="font-bold text-slate-900">
+                      Header Language Pill (🇺🇸 EN ⌄)
+                    </div>
+                    <div className="text-slate-500 text-[11px] mt-0.5">
+                      Show the rounded flag + language code pill in the top header bar.
+                    </div>
+                  </div>
+                </label>
+
+                <label className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-start gap-2.5 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={readingConfig.showContactButtonInHeader}
+                    onChange={(e) =>
+                      handleUpdateReadingAndLayout(
+                        { showContactButtonInHeader: e.target.checked },
+                        'Header Contact Us button updated.'
+                      )
+                    }
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <div className="font-bold text-slate-900">
+                      Header "Contact Us" Dark Button
+                    </div>
+                    <div className="text-slate-500 text-[11px] mt-0.5">
+                      Show the dark navy Contact Us pill button with mail icon in the header.
+                    </div>
+                  </div>
+                </label>
+
+                <label className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-start gap-2.5 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={readingConfig.showLanguageDropdownInFooter}
+                    onChange={(e) =>
+                      handleUpdateReadingAndLayout(
+                        { showLanguageDropdownInFooter: e.target.checked },
+                        'Footer language dropdown updated.'
+                      )
+                    }
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <div className="font-bold text-slate-900">
+                      Footer Language Dropdown
+                    </div>
+                    <div className="text-slate-500 text-[11px] mt-0.5">
+                      Show language dropdown selector and links in the site footer.
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">
+                    Logo Top Line (Dark Bold)
+                  </label>
+                  <input
+                    type="text"
+                    value={readingConfig.brandTopTitle || 'Scribd'}
+                    onChange={(e) =>
+                      handleUpdateReadingAndLayout({ brandTopTitle: e.target.value })
+                    }
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">
+                    Logo Bottom Line (Blue-Cyan Gradient)
+                  </label>
+                  <input
+                    type="text"
+                    value={readingConfig.brandBottomTitle || 'Downloader'}
+                    onChange={(e) =>
+                      handleUpdateReadingAndLayout({ brandBottomTitle: e.target.value })
+                    }
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">
+                    Header Contact Button Text
+                  </label>
+                  <input
+                    type="text"
+                    value={readingConfig.contactButtonText || 'Contact Us'}
+                    onChange={(e) =>
+                      handleUpdateReadingAndLayout({ contactButtonText: e.target.value })
+                    }
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">
+                    Contact Button Target Page
+                  </label>
+                  <select
+                    value={readingConfig.contactButtonPageSlug || 'contact-us'}
+                    onChange={(e) =>
+                      handleUpdateReadingAndLayout(
+                        { contactButtonPageSlug: e.target.value },
+                        'Updated Contact Us button target page!'
+                      )
+                    }
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg"
+                  >
+                    {cms.pages.map((pg) => (
+                      <option key={pg.id} value={pg.slug}>
+                        {pg.title} (/p/{pg.slug})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">
+                    Footer Description / Tagline
+                  </label>
+                  <input
+                    type="text"
+                    value={readingConfig.footerTagline}
+                    onChange={(e) =>
+                      handleUpdateReadingAndLayout({ footerTagline: e.target.value })
+                    }
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">
+                    Footer Copyright Text
+                  </label>
+                  <input
+                    type="text"
+                    value={readingConfig.footerCopyrightText}
+                    onChange={(e) =>
+                      handleUpdateReadingAndLayout({ footerCopyrightText: e.target.value })
+                    }
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg"
+                  />
+                </div>
+              </div>
+
+              {/* Quick Language Add & Delete Bar inside Header/Footer Settings */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 uppercase font-mono">
+                      Added Header & Footer Switcher Languages ({cms.languages.length})
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Add or delete languages from the Header & Footer switcher, or click any preset language below to add it in 1 click.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSection('polylang')}
+                    className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
+                  >
+                    Open Full Language & Region Settings →
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {cms.languages.map((lang) => (
+                    <div
+                      key={lang.code}
+                      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs ${
+                        lang.enabled
+                          ? 'bg-white border-slate-300 text-slate-800 shadow-2xs'
+                          : 'bg-slate-100 border-slate-200 text-slate-400'
+                      }`}
+                    >
+                      <span>{lang.flag}</span>
+                      <span className="font-bold uppercase">{lang.code}</span>
+                      <span className="text-slate-500">({lang.nativeName})</span>
+                      {lang.regions && lang.regions.length > 0 && (
+                        <span className="text-[10px] font-mono bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
+                          {lang.regions.slice(0, 2).join(',')}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        disabled={cms.languages.length <= 1}
+                        onClick={() => handleDeleteLanguage(lang.code)}
+                        className="text-red-500 hover:text-red-700 ml-1 cursor-pointer disabled:opacity-30"
+                        title={`Delete ${lang.name}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-1 border-t border-slate-200/80 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-semibold text-slate-500 mr-1">
+                    + Quick Add Language:
+                  </span>
+                  {WORLD_LANGUAGE_PRESETS.filter(
+                    (preset) => !cms.languages.some((l) => l.code === preset.code)
+                  ).map((preset) => (
+                    <button
+                      key={preset.code}
+                      type="button"
+                      onClick={() => handleQuickAddPresetLanguage(preset)}
+                      className="px-2.5 py-1 bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 hover:border-blue-300 rounded-full text-[11px] font-medium flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <span>{preset.flag}</span>
+                      <span>+ {preset.name} ({preset.code.toUpperCase()})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Quick Assignment Matrix for Important Pages in Header, Footer, Homepage & Blog + Delete Option */}
+              <div className="space-y-2 pt-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-800 uppercase font-mono">
+                    Header & Footer Pages Manager (Add, Edit, Assign Home/Blog, or Delete Any Page)
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSection('pages');
+                      handleCreateNewPage(editingLang);
+                    }}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ Add New Page</span>
+                  </button>
+                </div>
+
+                <div className="border border-slate-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600">
+                        <th className="py-2.5 px-4">Page Title & Slug</th>
+                        <th className="py-2.5 px-4 text-center">In Header</th>
+                        <th className="py-2.5 px-4 text-center">In Footer</th>
+                        <th className="py-2.5 px-4 text-right">Assign Home / Blog / Edit / Delete</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 text-xs">
+                      {cms.pages.map((pg) => {
+                        const isCurrentStaticHome =
+                          readingConfig.homepageMode === 'static-page' &&
+                          readingConfig.homepageStaticPageId === pg.id;
+                        const isCurrentStaticBlog =
+                          readingConfig.blogPageMode === 'static-page' &&
+                          readingConfig.blogStaticPageId === pg.id;
+
+                        return (
+                          <tr key={pg.id} className="hover:bg-slate-50">
+                            <td className="py-2.5 px-4">
+                              <div className="font-semibold text-slate-900 flex items-center gap-2">
+                                <span>{pg.title}</span>
+                                {isCurrentStaticHome && (
+                                  <span className="px-2 py-0.5 text-[10px] font-bold bg-blue-100 text-blue-800 rounded">
+                                    ACTIVE HOMEPAGE
+                                  </span>
+                                )}
+                                {isCurrentStaticBlog && (
+                                  <span className="px-2 py-0.5 text-[10px] font-bold bg-indigo-100 text-indigo-800 rounded">
+                                    ACTIVE BLOG PAGE
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] font-mono text-slate-400">
+                                /p/{pg.slug} ({pg.lang.toUpperCase()})
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-4 text-center">
+                              <input
+                                type="checkbox"
+                                checked={pg.showInHeader}
+                                onChange={(e) => {
+                                  const nextPages = cms.pages.map((item) =>
+                                    item.id === pg.id
+                                      ? { ...item, showInHeader: e.target.checked }
+                                      : item
+                                  );
+                                  onUpdateCms({ ...cms, pages: nextPages });
+                                  triggerSavedToast(`Updated Header visibility for "${pg.title}"`);
+                                }}
+                                className="cursor-pointer"
+                              />
+                            </td>
+                            <td className="py-2.5 px-4 text-center">
+                              <input
+                                type="checkbox"
+                                checked={pg.showInFooter}
+                                onChange={(e) => {
+                                  const nextPages = cms.pages.map((item) =>
+                                    item.id === pg.id
+                                      ? { ...item, showInFooter: e.target.checked }
+                                      : item
+                                  );
+                                  onUpdateCms({ ...cms, pages: nextPages });
+                                  triggerSavedToast(`Updated Footer visibility for "${pg.title}"`);
+                                }}
+                                className="cursor-pointer"
+                              />
+                            </td>
+                            <td className="py-2.5 px-4 text-right space-x-1.5 whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleUpdateReadingAndLayout(
+                                    isCurrentStaticHome
+                                      ? { homepageMode: 'default-downloader' }
+                                      : {
+                                          homepageMode: 'static-page',
+                                          homepageStaticPageId: pg.id
+                                        },
+                                    isCurrentStaticHome
+                                      ? 'Reverted to Default Downloader Homepage.'
+                                      : `"${pg.title}" set as Static Homepage!`
+                                  )
+                                }
+                                className={`px-2 py-1 rounded text-[11px] font-semibold cursor-pointer ${
+                                  isCurrentStaticHome
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                                }`}
+                              >
+                                {isCurrentStaticHome ? '★ Home' : 'Set Home'}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleUpdateReadingAndLayout(
+                                    isCurrentStaticBlog
+                                      ? { blogPageMode: 'default-blog' }
+                                      : {
+                                          blogPageMode: 'static-page',
+                                          blogStaticPageId: pg.id
+                                        },
+                                    isCurrentStaticBlog
+                                      ? 'Reverted to Default Blog Page.'
+                                      : `"${pg.title}" set as Static Blog Page!`
+                                  )
+                                }
+                                className={`px-2 py-1 rounded text-[11px] font-semibold cursor-pointer ${
+                                  isCurrentStaticBlog
+                                    ? 'bg-indigo-600 text-white'
+                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                                }`}
+                              >
+                                {isCurrentStaticBlog ? '★ Blog' : 'Set Blog'}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSection('pages');
+                                  setEditingPage(pg);
+                                }}
+                                className="px-2 py-1 bg-slate-900 text-white rounded text-[11px] font-semibold cursor-pointer"
+                              >
+                                Edit
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleDeletePage(pg.id)}
+                                className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                                title="Delete Page"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Delete</span>
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -633,6 +1552,7 @@ export default function AdminDashboard({
                           contentHtml: nextHtml
                         })
                       }
+                      shortcodes={cms.shortcodes}
                       minHeight="240px"
                     />
                   </div>
@@ -645,7 +1565,8 @@ export default function AdminDashboard({
                   label={`Additional Homepage Custom Content Block (${editingLang.toUpperCase()})`}
                   value={currentStrings.customHomeHtml}
                   onChange={(nextHtml) => handleStringChange('customHomeHtml', nextHtml)}
-                  placeholder="Write additional SEO articles, tables, or custom blocks for the homepage..."
+                  placeholder="Write additional SEO articles, tables, shortcodes like [custom_cta_banner], or custom blocks for the homepage..."
+                  shortcodes={cms.shortcodes}
                   minHeight="250px"
                 />
               </div>
@@ -660,10 +1581,10 @@ export default function AdminDashboard({
               <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200">
                 <div>
                   <h2 className="text-xl font-bold text-slate-900 font-display">
-                    Pages Manager (WordPress Editor + Multi-Content Switcher)
+                    Pages Manager (WordPress Editor + Shortcodes + Multi-Content Switcher)
                   </h2>
                   <p className="text-xs text-slate-600 mt-1">
-                    Edit existing pages or create new pages with the WordPress Visual/Code Editor and interactive Multi-Content Switcher tabs.
+                    Edit existing pages or create new pages with the WordPress Visual/Code Editor, custom Shortcodes, and interactive Multi-Content Switcher tabs.
                   </p>
                 </div>
 
@@ -759,6 +1680,7 @@ export default function AdminDashboard({
                     onChange={(nextHtml) =>
                       setEditingPage({ ...editingPage, contentHtml: nextHtml })
                     }
+                    shortcodes={cms.shortcodes}
                     minHeight="280px"
                   />
 
@@ -867,6 +1789,7 @@ export default function AdminDashboard({
                                   contentHtml: nextHtml
                                 })
                               }
+                              shortcodes={cms.shortcodes}
                               minHeight="200px"
                             />
                           </div>
@@ -898,9 +1821,9 @@ export default function AdminDashboard({
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600">
-                        <th className="py-2.5 px-4">Page Title & URL</th>
+                        <th className="py-2.5 px-4">Page Title, URL & Role</th>
                         <th className="py-2.5 px-4">Lang</th>
-                        <th className="py-2.5 px-4">Switcher Tabs</th>
+                        <th className="py-2.5 px-4">Menus</th>
                         <th className="py-2.5 px-4">Polylang Translations</th>
                         <th className="py-2.5 px-4 text-right">Actions</th>
                       </tr>
@@ -908,19 +1831,47 @@ export default function AdminDashboard({
                     <tbody className="divide-y divide-slate-200 text-xs">
                       {cms.pages.map((pg) => {
                         const langObj = cms.languages.find((l) => l.code === pg.lang);
+                        const isStaticHome =
+                          readingConfig.homepageMode === 'static-page' &&
+                          readingConfig.homepageStaticPageId === pg.id;
+                        const isStaticBlog =
+                          readingConfig.blogPageMode === 'static-page' &&
+                          readingConfig.blogStaticPageId === pg.id;
+
                         return (
                           <tr key={pg.id} className="hover:bg-slate-50">
                             <td className="py-3 px-4">
-                              <div className="font-semibold text-slate-900">{pg.title}</div>
+                              <div className="font-semibold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                                <span>{pg.title}</span>
+                                {isStaticHome && (
+                                  <span className="px-1.5 py-0.5 text-[10px] font-bold bg-blue-100 text-blue-800 rounded">
+                                    HOMEPAGE
+                                  </span>
+                                )}
+                                {isStaticBlog && (
+                                  <span className="px-1.5 py-0.5 text-[10px] font-bold bg-indigo-100 text-indigo-800 rounded">
+                                    BLOG PAGE
+                                  </span>
+                                )}
+                              </div>
                               <div className="text-slate-400 font-mono text-[11px]">
-                                /p/{pg.slug}
+                                /p/{pg.slug} · {(pg.switcherSections || []).length} Tabs
                               </div>
                             </td>
                             <td className="py-3 px-4 whitespace-nowrap">
                               {langObj?.flag} {pg.lang.toUpperCase()}
                             </td>
-                            <td className="py-3 px-4 font-mono text-slate-600">
-                              {(pg.switcherSections || []).length} Tabs
+                            <td className="py-3 px-4 whitespace-nowrap text-[11px] space-x-1">
+                              {pg.showInHeader && (
+                                <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded font-medium">
+                                  Header
+                                </span>
+                              )}
+                              {pg.showInFooter && (
+                                <span className="px-2 py-0.5 bg-slate-100 text-slate-700 border border-slate-200 rounded font-medium">
+                                  Footer
+                                </span>
+                              )}
                             </td>
                             <td className="py-3 px-4">
                               <div className="flex items-center gap-1.5 flex-wrap">
@@ -957,11 +1908,59 @@ export default function AdminDashboard({
                                   })}
                               </div>
                             </td>
-                            <td className="py-3 px-4 text-right space-x-2 whitespace-nowrap">
+                            <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleUpdateReadingAndLayout(
+                                    isStaticHome
+                                      ? { homepageMode: 'default-downloader' }
+                                      : {
+                                          homepageMode: 'static-page',
+                                          homepageStaticPageId: pg.id
+                                        },
+                                    isStaticHome
+                                      ? 'Reverted to Default Downloader Homepage.'
+                                      : `"${pg.title}" set as Static Homepage!`
+                                  )
+                                }
+                                className={`px-2 py-1 rounded text-[11px] font-medium cursor-pointer ${
+                                  isStaticHome
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                                }`}
+                                title="Set this static page as the main Homepage"
+                              >
+                                {isStaticHome ? '★ Home' : 'Set Home'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleUpdateReadingAndLayout(
+                                    isStaticBlog
+                                      ? { blogPageMode: 'default-blog' }
+                                      : {
+                                          blogPageMode: 'static-page',
+                                          blogStaticPageId: pg.id
+                                        },
+                                    isStaticBlog
+                                      ? 'Reverted to Default Blog Page.'
+                                      : `"${pg.title}" set as Static Blog Page!`
+                                  )
+                                }
+                                className={`px-2 py-1 rounded text-[11px] font-medium cursor-pointer ${
+                                  isStaticBlog
+                                    ? 'bg-indigo-600 text-white'
+                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                                }`}
+                                title="Set this static page as the Blog Page"
+                              >
+                                {isStaticBlog ? '★ Blog' : 'Set Blog'}
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => onPreviewCustomPage(pg.slug)}
-                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded cursor-pointer inline-flex items-center gap-1"
+                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded cursor-pointer inline-flex items-center gap-1"
                               >
                                 <Eye className="w-3 h-3" />
                                 <span>View</span>
@@ -974,7 +1973,7 @@ export default function AdminDashboard({
                                 }}
                                 className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium rounded cursor-pointer"
                               >
-                                Edit in WP Editor
+                                Edit
                               </button>
                               <button
                                 type="button"
@@ -989,6 +1988,205 @@ export default function AdminDashboard({
                       })}
                     </tbody>
                   </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 2.5 CUSTOM SHORTCODES BUILDER ([shortcode]) */}
+        {section === 'shortcodes' && (
+          <div className="space-y-6 max-w-5xl">
+            <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 font-display flex items-center gap-2">
+                    <Braces className="w-5 h-5 text-blue-600" />
+                    <span>Custom Shortcodes Builder & Design Studio</span>
+                  </h2>
+                  <p className="text-xs text-slate-600 mt-1">
+                    Create custom HTML, CSS, and visual designs once, then insert <code className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-indigo-700 font-semibold">[your_shortcode]</code> inside any Page, Blog Post, or Homepage section.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleCreateNewShortcode}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Create New Shortcode</span>
+                </button>
+              </div>
+
+              {editingShortcode ? (
+                <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-5">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Shortcode Tag (Used as <code className="font-mono text-indigo-600">[{editingShortcode.tag || 'my_tag'}]</code>)
+                      </label>
+                      <input
+                        type="text"
+                        value={editingShortcode.tag}
+                        onChange={(e) =>
+                          setEditingShortcode({
+                            ...editingShortcode,
+                            tag: e.target.value.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()
+                          })
+                        }
+                        placeholder="custom_promo_box"
+                        className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Design Name / Label
+                      </label>
+                      <input
+                        type="text"
+                        value={editingShortcode.name}
+                        onChange={(e) =>
+                          setEditingShortcode({ ...editingShortcode, name: e.target.value })
+                        }
+                        placeholder="Custom Pricing or Hero Card"
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Short Description
+                      </label>
+                      <input
+                        type="text"
+                        value={editingShortcode.description}
+                        onChange={(e) =>
+                          setEditingShortcode({
+                            ...editingShortcode,
+                            description: e.target.value
+                          })
+                        }
+                        placeholder="Where or how this shortcode is used..."
+                        className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Custom HTML/CSS/Visual Editor for Shortcode */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-700 block">
+                      Custom HTML / CSS / Visual Design (Supports full HTML, inline CSS, <code className="font-mono">&lt;style&gt;</code> tags, tables, grids & buttons):
+                    </label>
+                    <WordPressEditor
+                      label={`Shortcode Design Studio — [${editingShortcode.tag || 'shortcode'}]`}
+                      value={editingShortcode.htmlCode}
+                      onChange={(nextHtml) =>
+                        setEditingShortcode({ ...editingShortcode, htmlCode: nextHtml })
+                      }
+                      shortcodes={cms.shortcodes}
+                      minHeight="260px"
+                    />
+                  </div>
+
+                  {/* Live Rendered Output Preview */}
+                  <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-2">
+                    <div className="text-xs font-mono font-semibold text-slate-500 uppercase">
+                      Live Rendered Shortcode Preview (<code className="text-indigo-600">[{editingShortcode.tag}]</code>):
+                    </div>
+                    <div
+                      className="prose prose-slate max-w-none text-sm"
+                      dangerouslySetInnerHTML={{ __html: editingShortcode.htmlCode }}
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditingShortcode(null)}
+                      className="px-4 py-2 text-xs font-medium text-slate-600 bg-white border border-slate-300 rounded-lg cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveShortcode}
+                      className="px-5 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Save Shortcode [{editingShortcode.tag}]</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="border border-slate-200 rounded-lg overflow-hidden">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600">
+                          <th className="py-2.5 px-4">Shortcode Tag (Click to Copy)</th>
+                          <th className="py-2.5 px-4">Design Name & Description</th>
+                          <th className="py-2.5 px-4">Status</th>
+                          <th className="py-2.5 px-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 text-xs">
+                        {(cms.shortcodes || []).map((sc) => (
+                          <tr key={sc.id} className="hover:bg-slate-50">
+                            <td className="py-3 px-4 whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => handleCopyShortcodeTag(sc.tag)}
+                                className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md font-mono font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer"
+                                title="Click to copy shortcode"
+                              >
+                                <span>[{sc.tag}]</span>
+                                {copiedShortcodeTag === sc.tag ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                ) : (
+                                  <Copy className="w-3 h-3 text-indigo-500" />
+                                )}
+                              </button>
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="font-semibold text-slate-900">{sc.name}</div>
+                              <div className="text-slate-500 text-[11px]">{sc.description}</div>
+                            </td>
+                            <td className="py-3 px-4 whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleShortcode(sc.id)}
+                                className={`px-2.5 py-1 rounded text-[11px] font-semibold cursor-pointer ${
+                                  sc.enabled
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-slate-200 text-slate-600'
+                                }`}
+                              >
+                                {sc.enabled ? 'Active' : 'Disabled'}
+                              </button>
+                            </td>
+                            <td className="py-3 px-4 text-right space-x-2 whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => setEditingShortcode(sc)}
+                                className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium rounded cursor-pointer"
+                              >
+                                Edit Design
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteShortcode(sc.id)}
+                                className="px-2 py-1 text-red-600 hover:bg-red-50 rounded cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 inline" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </div>
@@ -1118,6 +2316,7 @@ export default function AdminDashboard({
                     onChange={(nextHtml) =>
                       setEditingPost({ ...editingPost, contentHtml: nextHtml })
                     }
+                    shortcodes={cms.shortcodes}
                     minHeight="320px"
                   />
 
@@ -1237,49 +2436,159 @@ export default function AdminDashboard({
           </div>
         )}
 
-        {/* 4. ADS PLACEMENT MANAGER */}
+        {/* 4. ADS PLACEMENT MANAGER (WITH ADD NEW AD SLOT & DELETE AD SLOT) */}
         {section === 'ads' && (
-          <div className="space-y-6 max-w-4xl">
-            <div className="bg-white border border-slate-200 rounded-xl p-6">
-              <h2 className="text-xl font-bold text-slate-900 font-display">
-                Ad Placements & Custom Ad Code Manager
-              </h2>
-              <p className="text-xs text-slate-600 mt-1">
-                Enable or disable ad slots across the website and paste your Google AdSense, Adsterra, or custom HTML banner code.
-              </p>
+          <div className="space-y-6 max-w-5xl">
+            <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-6">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 font-display">
+                  Ad Placements & Custom Ad Code Manager (Add, Edit & Delete Ads)
+                </h2>
+                <p className="text-xs text-slate-600 mt-1">
+                  Add new ad slots, delete existing ad slots, toggle live visibility, and paste Google AdSense, Adsterra, or custom HTML banner scripts.
+                </p>
+              </div>
 
-              <div className="mt-6 space-y-5">
+              {/* Create / Add New Ad Slot Form */}
+              <form
+                onSubmit={handleAddAdSlot}
+                className="p-5 bg-blue-50/50 border border-blue-200 rounded-xl space-y-4"
+              >
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                    <Plus className="w-4 h-4 text-blue-600" />
+                    <span>Add New Ad Slot</span>
+                  </h3>
+                  <span className="text-[11px] font-mono text-blue-700 bg-blue-100 px-2 py-0.5 rounded">
+                    Supports AdSense / Adsterra / Custom HTML
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Ad Slot Title / Name
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Sidebar / In-Page Banner Ad"
+                      value={newAdName}
+                      onChange={(e) => setNewAdName(e.target.value)}
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Placement Zone on Website
+                    </label>
+                    <select
+                      value={newAdZone}
+                      onChange={(e) =>
+                        setNewAdZone(
+                          e.target.value as NonNullable<AdSlotConfig['placementZone']>
+                        )
+                      }
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                    >
+                      <option value="header-leaderboard">Top Header Leaderboard (All Pages)</option>
+                      <option value="below-downloader-banner">Below Fetch & Download PDF Box</option>
+                      <option value="above-viewer-banner">Above Unlocked PDF Viewer</option>
+                      <option value="in-article-tutorial">Homepage Between Tutorial & Blog</option>
+                      <option value="blog-top-banner">Blog Page & Articles Top Banner</option>
+                      <option value="page-top-banner">Custom Static Pages Top Banner</option>
+                      <option value="footer-sticky-banner">Footer Sticky / Bottom Banner</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Ad Dimensions Label
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="728×90 / Responsive"
+                      value={newAdDimensions}
+                      onChange={(e) => setNewAdDimensions(e.target.value)}
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1">
+                    Ad HTML / Script Code
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={newAdHtml}
+                    onChange={(e) => setNewAdHtml(e.target.value)}
+                    className="w-full p-3 text-xs font-mono bg-white border border-slate-300 rounded-lg"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Add New Ad Slot</span>
+                </button>
+              </form>
+
+              <div className="space-y-4">
                 {cms.ads.map((ad) => (
                   <div
                     key={ad.id}
                     className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-3"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-sm font-bold text-slate-900">
-                            {ad.name}
-                          </h3>
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            type="text"
+                            value={ad.name}
+                            onChange={(e) =>
+                              handleUpdateAdMeta(ad.id, { name: e.target.value })
+                            }
+                            className="text-sm font-bold text-slate-900 bg-white border border-slate-200 rounded px-2 py-0.5"
+                          />
                           <span className="text-xs font-mono text-slate-500">
                             ({ad.dimensions})
                           </span>
+                          <span className="text-[11px] font-mono bg-slate-200/80 text-slate-700 px-2 py-0.5 rounded">
+                            ID: {ad.id}
+                          </span>
                         </div>
-                        <p className="text-xs text-slate-500 mt-0.5">
+                        <p className="text-xs text-slate-500">
                           {ad.locationDescription}
                         </p>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleToggleAd(ad.id)}
-                        className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                          ad.enabled
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-                        }`}
-                      >
-                        {ad.enabled ? 'Enabled (Live on Site)' : 'Disabled (Hidden)'}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleAd(ad.id)}
+                          className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                            ad.enabled
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                          }`}
+                        >
+                          {ad.enabled ? 'Enabled (Live on Site)' : 'Disabled (Hidden)'}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteAdSlot(ad.id)}
+                          className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                          title="Delete this Ad Slot"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete Ad</span>
+                        </button>
+                      </div>
                     </div>
 
                     <div className="space-y-1.5">
@@ -1301,17 +2610,69 @@ export default function AdminDashboard({
           </div>
         )}
 
-        {/* 5. POLYLANG MULTI-LANGUAGE MANAGER */}
+        {/* 5. POLYLANG MULTI-LANGUAGE MANAGER + BROWSER & REGION AUTO-SWITCHER */}
         {section === 'polylang' && (
-          <div className="space-y-6 max-w-4xl">
+          <div className="space-y-6 max-w-5xl">
             <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-6">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900 font-display">
-                  Polylang Multi-Language Manager
-                </h2>
-                <p className="text-xs text-slate-600 mt-1">
-                  Manage site languages, RTL/LTR text direction, default language, and add new languages.
-                </p>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 font-display">
+                    Polylang Multi-Language & Region Auto-Switch Manager
+                  </h2>
+                  <p className="text-xs text-slate-600 mt-1">
+                    Add or delete languages, configure ISO region codes (e.g. PK, IN, US, SA), and auto-switch visitor language based on browser language & region.
+                  </p>
+                </div>
+
+                <label className="px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-2.5 text-xs font-semibold text-blue-950 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={readingConfig.autoDetectBrowserLanguage}
+                    onChange={(e) =>
+                      handleUpdateReadingAndLayout(
+                        { autoDetectBrowserLanguage: e.target.checked },
+                        'Browser & Region language auto-switch updated!'
+                      )
+                    }
+                  />
+                  <span>
+                    Auto-Switch by Browser & Region ({detectedBrowserInfo.browserLocale} · {detectedBrowserInfo.detectedRegion} → {detectedBrowserInfo.matchedCode.toUpperCase()})
+                  </span>
+                </label>
+              </div>
+
+              {/* 1-Click Preset World Languages Adder */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                <div className="text-xs font-bold text-slate-800 uppercase font-mono">
+                  1-Click Add Popular World Languages (With Pre-Configured Region Codes)
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {WORLD_LANGUAGE_PRESETS.map((preset) => {
+                    const alreadyAdded = cms.languages.some((l) => l.code === preset.code);
+                    return (
+                      <button
+                        key={preset.code}
+                        type="button"
+                        disabled={alreadyAdded}
+                        onClick={() => handleQuickAddPresetLanguage(preset)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-medium border flex items-center gap-1.5 transition-colors ${
+                          alreadyAdded
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-700 opacity-75 cursor-default'
+                            : 'bg-white hover:bg-blue-50 border-slate-300 hover:border-blue-400 text-slate-800 cursor-pointer'
+                        }`}
+                      >
+                        <span>{preset.flag}</span>
+                        <span>{preset.name}</span>
+                        <span className="font-mono text-[10px] opacity-75">
+                          ({preset.code.toUpperCase()})
+                        </span>
+                        <span className="font-bold">
+                          {alreadyAdded ? '✓ Added' : '+ Add'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="border border-slate-200 rounded-lg overflow-hidden">
@@ -1319,10 +2680,11 @@ export default function AdminDashboard({
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600">
                       <th className="py-2.5 px-4">Flag & Language Name</th>
-                      <th className="py-2.5 px-4">Locale Code</th>
+                      <th className="py-2.5 px-4">Code</th>
+                      <th className="py-2.5 px-4">Auto-Switch Region Codes</th>
                       <th className="py-2.5 px-4">Direction</th>
                       <th className="py-2.5 px-4">Default</th>
-                      <th className="py-2.5 px-4 text-right">Status</th>
+                      <th className="py-2.5 px-4 text-right">Status & Delete</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 text-xs">
@@ -1335,7 +2697,19 @@ export default function AdminDashboard({
                             ({l.nativeName})
                           </span>
                         </td>
-                        <td className="py-3 px-4 font-mono">{l.code}</td>
+                        <td className="py-3 px-4 font-mono font-bold uppercase">{l.code}</td>
+                        <td className="py-3 px-4">
+                          <input
+                            type="text"
+                            value={(l.regions || []).join(', ')}
+                            onChange={(e) =>
+                              handleUpdateLanguageRegions(l.code, e.target.value)
+                            }
+                            placeholder="US, GB"
+                            className="w-36 px-2.5 py-1 text-xs font-mono bg-white border border-slate-300 rounded"
+                            title="Comma-separated ISO country/region codes for automatic switching"
+                          />
+                        </td>
                         <td className="py-3 px-4 font-mono uppercase">{l.dir}</td>
                         <td className="py-3 px-4">
                           {l.isDefault ? (
@@ -1352,7 +2726,7 @@ export default function AdminDashboard({
                             </button>
                           )}
                         </td>
-                        <td className="py-3 px-4 text-right">
+                        <td className="py-3 px-4 text-right space-x-2 whitespace-nowrap">
                           <button
                             type="button"
                             disabled={l.isDefault}
@@ -1364,6 +2738,17 @@ export default function AdminDashboard({
                             } disabled:opacity-50`}
                           >
                             {l.enabled ? 'Active' : 'Hidden'}
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={cms.languages.length <= 1}
+                            onClick={() => handleDeleteLanguage(l.code)}
+                            className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded text-xs font-medium inline-flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                            title="Delete this language from Polylang"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Delete</span>
                           </button>
                         </td>
                       </tr>
@@ -1377,9 +2762,9 @@ export default function AdminDashboard({
                 className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-4"
               >
                 <h3 className="text-sm font-bold text-slate-900">
-                  Add New Language to Polylang
+                  Add Custom Language & Region Mapping
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
                   <div>
                     <label className="text-xs font-medium text-slate-700 block mb-1">
                       ISO Code
@@ -1420,6 +2805,18 @@ export default function AdminDashboard({
                   </div>
                   <div>
                     <label className="text-xs font-medium text-slate-700 block mb-1">
+                      Region Codes
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="FR, BE, CH"
+                      value={newLangRegions}
+                      onChange={(e) => setNewLangRegions(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-slate-700 block mb-1">
                       Flag Emoji
                     </label>
                     <input
@@ -1449,7 +2846,7 @@ export default function AdminDashboard({
                   className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>Add Language</span>
+                  <span>+ Add Language</span>
                 </button>
               </form>
             </div>

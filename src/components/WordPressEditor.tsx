@@ -29,12 +29,19 @@ import {
   Megaphone
 } from 'lucide-react';
 
+import {
+  ShortcodeItem,
+  DEFAULT_SHORTCODES,
+  renderShortcodesInHtml
+} from '../lib/cmsStore';
+
 interface WordPressEditorProps {
   value: string;
   onChange: (nextHtml: string) => void;
   label?: string;
   placeholder?: string;
   minHeight?: string;
+  shortcodes?: ShortcodeItem[];
 }
 
 type EditorTab = 'visual' | 'code' | 'preview';
@@ -43,8 +50,9 @@ export default function WordPressEditor({
   value,
   onChange,
   label = 'WordPress Visual & HTML Editor',
-  placeholder = 'Start writing or click + to insert blocks, headings, images, tables, or multi-tab content switchers...',
-  minHeight = '320px'
+  placeholder = 'Start writing or click + to insert blocks, headings, images, tables, shortcodes, or multi-tab content switchers...',
+  minHeight = '320px',
+  shortcodes = DEFAULT_SHORTCODES
 }: WordPressEditorProps) {
   const [activeTab, setActiveTab] = useState<EditorTab>('visual');
   const [showLinkInput, setShowLinkInput] = useState<boolean>(false);
@@ -499,6 +507,28 @@ export default function WordPressEditor({
         </button>
       </div>
 
+      {/* Custom Shortcodes Quick-Insert Bar */}
+      {shortcodes && shortcodes.length > 0 && (
+        <div className="px-3 py-1.5 bg-indigo-50/70 border-b border-slate-200 flex flex-wrap items-center gap-1.5 text-[11px]">
+          <span className="font-semibold text-indigo-900 flex items-center gap-1 mr-1 font-mono">
+            <span>[Shortcodes]:</span>
+          </span>
+          {shortcodes
+            .filter((sc) => sc.enabled)
+            .map((sc) => (
+              <button
+                key={sc.id}
+                type="button"
+                title={`Insert [${sc.tag}] — ${sc.name}`}
+                onClick={() => insertHtmlSnippet(`<p>[${sc.tag}]</p>`)}
+                className="px-2 py-0.5 bg-white hover:bg-indigo-600 text-indigo-700 hover:text-white border border-indigo-200 rounded font-mono text-[11px] font-semibold transition-colors cursor-pointer"
+              >
+                [{sc.tag}]
+              </button>
+            ))}
+        </div>
+      )}
+
       {/* Inline Link Inserter Bar */}
       {showLinkInput && (
         <form
@@ -602,9 +632,9 @@ export default function WordPressEditor({
           style={{ minHeight }}
           className="p-6 bg-slate-50/50 prose prose-slate max-w-none text-sm leading-relaxed overflow-y-auto"
           dangerouslySetInnerHTML={{
-            __html:
-              value ||
-              `<p class="text-slate-400 italic">Nothing to preview yet. Switch to Visual or Code editor to add content.</p>`
+            __html: value
+              ? renderShortcodesInHtml(value, shortcodes)
+              : `<p class="text-slate-400 italic">Nothing to preview yet. Switch to Visual or Code editor to add content.</p>`
           }}
         />
       )}
@@ -612,7 +642,7 @@ export default function WordPressEditor({
       {/* Bottom WordPress Status Bar */}
       <div className="px-4 py-2 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500 font-mono">
         <span>
-          Mode: <strong className="uppercase text-slate-700">{activeTab}</strong> · Gutenberg HTML Ready
+          Mode: <strong className="uppercase text-slate-700">{activeTab}</strong> · Gutenberg HTML + Shortcodes Ready
         </span>
         <span>
           {wordCount} words · {(value || '').length} chars

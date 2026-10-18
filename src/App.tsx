@@ -9,17 +9,21 @@ import {
   AlertCircle,
   Maximize2,
   FileText,
+  FileDown,
   Copy,
   Check,
   Sliders,
   Layers,
   Zap,
   Globe,
-  Settings,
   BookOpen,
   ArrowLeft,
   Calendar,
-  User
+  User,
+  ChevronDown,
+  Mail,
+  Menu,
+  X
 } from 'lucide-react';
 import {
   ScribdDocumentData,
@@ -34,13 +38,21 @@ import {
 } from './lib/scribdCore';
 import {
   CmsStoreState,
+  DEFAULT_READING_AND_LAYOUT,
   loadCmsState,
   saveCmsState,
   UIStringTranslations,
   SeoLanguageConfig,
-  ContentSwitcherSectionItem
+  ContentSwitcherSectionItem,
+  ShortcodeItem,
+  renderShortcodesInHtml,
+  detectBrowserAndRegionLanguage,
+  USER_LANG_OVERRIDE_KEY,
+  isAdminAuthenticatedSession,
+  logoutAdminSession
 } from './lib/cmsStore';
 import AdminDashboard from './components/AdminDashboard';
+import AdminLogin from './components/AdminLogin';
 
 type ViewerTab = 'original-embed' | 'page-grid' | 'pdf-preview';
 type RelayNode = 'auto' | 'direct-proxy' | 'allorigins' | 'codetabs' | 'corsproxy';
@@ -51,13 +63,101 @@ type ActiveRoute =
   | { view: 'custom-page'; slug: string }
   | { view: 'admin' };
 
+function detectInitialRouteFromUrl(): ActiveRoute {
+  if (typeof window === 'undefined') return { view: 'home' };
+  const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
+  const hash = window.location.hash.replace(/^#/, '');
+  const searchParams = new URLSearchParams(window.location.search);
+
+  if (
+    pathname === '/kmg' ||
+    pathname.startsWith('/kmg/') ||
+    hash === '/kmg' ||
+    hash === 'kmg' ||
+    searchParams.has('kmg')
+  ) {
+    return { view: 'admin' };
+  }
+
+  if (pathname === '/blog') {
+    return { view: 'blog-list' };
+  }
+  if (pathname.startsWith('/blog/')) {
+    const slug = pathname.slice('/blog/'.length);
+    if (slug) return { view: 'blog-post', slug };
+  }
+  if (pathname.startsWith('/p/')) {
+    const slug = pathname.slice('/p/'.length);
+    if (slug) return { view: 'custom-page', slug };
+  }
+
+  return { view: 'home' };
+}
+
+function renderRichContentWithDownloader(
+  html: string,
+  shortcodes?: ShortcodeItem[],
+  renderDownloaderWidget?: () => React.ReactNode
+): React.ReactNode {
+  if (!html) return null;
+
+  const isDownloaderShortcodeEnabled =
+    !shortcodes ||
+    shortcodes.length === 0 ||
+    shortcodes.some(
+      (s) => s.tag.trim().toLowerCase() === 'scribd_downloader' && s.enabled
+    );
+
+  const shortcodeRegex = /<p[^>]*>\s*\[scribd_downloader\]\s*<\/p>|\[scribd_downloader\]/gi;
+
+  if (
+    renderDownloaderWidget &&
+    isDownloaderShortcodeEnabled &&
+    shortcodeRegex.test(html)
+  ) {
+    const parts = html.split(shortcodeRegex);
+    return (
+      <div className="space-y-6">
+        {parts.map((segment, index) => (
+          <React.Fragment key={index}>
+            {segment.trim() && (
+              <div
+                className="prose prose-slate max-w-none text-sm text-slate-700 leading-relaxed space-y-3"
+                dangerouslySetInnerHTML={{
+                  __html: renderShortcodesInHtml(segment, shortcodes)
+                }}
+              />
+            )}
+            {index < parts.length - 1 && (
+              <div className="not-prose my-6">{renderDownloaderWidget()}</div>
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="prose prose-slate max-w-none text-sm text-slate-700 leading-relaxed space-y-3"
+      dangerouslySetInnerHTML={{
+        __html: renderShortcodesInHtml(html, shortcodes)
+      }}
+    />
+  );
+}
+
 /**
  * Reusable Interactive Multi-Content Switcher Component for Homepage & Custom Pages
  */
 function MultiContentSwitcher({
-  sections
+  sections,
+  shortcodes,
+  renderDownloaderWidget
 }: {
   sections?: ContentSwitcherSectionItem[];
+  shortcodes?: ShortcodeItem[];
+  renderDownloaderWidget?: () => React.ReactNode;
 }) {
   const [activeIdx, setActiveIdx] = useState<number>(0);
 
@@ -105,10 +205,13 @@ function MultiContentSwitcher({
         <h2 className="text-xl font-bold text-slate-900 font-display">
           {activeItem.title}
         </h2>
-        <div
-          className="prose prose-slate max-w-none text-sm text-slate-700 leading-relaxed space-y-3 pt-1"
-          dangerouslySetInnerHTML={{ __html: activeItem.contentHtml }}
-        />
+        <div className="pt-1">
+          {renderRichContentWithDownloader(
+            activeItem.contentHtml,
+            shortcodes,
+            renderDownloaderWidget
+          )}
+        </div>
       </div>
     </section>
   );
@@ -116,7 +219,41 @@ function MultiContentSwitcher({
 
 export default function App() {
   const [cms, setCms] = useState<CmsStoreState>(() => loadCmsState());
-  const [route, setRoute] = useState<ActiveRoute>({ view: 'home' });
+  const [route, setRouteState] = useState<ActiveRoute>(() => detectInitialRouteFromUrl());
+  const [isAdminAuth, setIsAdminAuth] = useState<boolean>(() =>
+    isAdminAuthenticatedSession()
+  );
+
+  const setRoute = (nextRoute: ActiveRoute) => {
+    setRouteState(nextRoute);
+    if (typeof window !== 'undefined') {
+      let targetUrl = '/';
+      if (nextRoute.view === 'admin') {
+        targetUrl = '/kmg';
+      } else if (nextRoute.view === 'blog-list') {
+        targetUrl = '/blog';
+      } else if (nextRoute.view === 'blog-post') {
+        targetUrl = `/blog/${nextRoute.slug}`;
+      } else if (nextRoute.view === 'custom-page') {
+        targetUrl = `/p/${nextRoute.slug}`;
+      }
+      if (window.location.pathname !== targetUrl) {
+        window.history.pushState({}, '', targetUrl);
+      }
+    }
+  };
+
+  useEffect(() => {
+    const onPopState = () => {
+      setRouteState(detectInitialRouteFromUrl());
+    };
+    window.addEventListener('popstate', onPopState);
+    window.addEventListener('hashchange', onPopState);
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+      window.removeEventListener('hashchange', onPopState);
+    };
+  }, []);
 
   const [urlInput, setUrlInput] = useState<string>('');
   const [relayNode, setRelayNode] = useState<RelayNode>('auto');
@@ -221,18 +358,36 @@ export default function App() {
   }, [activeLangObj, currentSeo, route, cms.blogPosts, cms.pages]);
 
   const renderAdSlot = (slotId: string) => {
-    const slot = cms.ads.find((a) => a.id === slotId);
-    if (!slot || !slot.enabled || !slot.htmlCode.trim()) return null;
+    const matchingSlots = cms.ads.filter(
+      (a) =>
+        (a.id === slotId || a.placementZone === slotId) &&
+        a.enabled &&
+        a.htmlCode.trim()
+    );
+    if (matchingSlots.length === 0) return null;
     return (
-      <div
-        className="w-full my-4 overflow-hidden no-print"
-        dangerouslySetInnerHTML={{ __html: slot.htmlCode }}
-      />
+      <div className="space-y-3 my-4 no-print">
+        {matchingSlots.map((slot) => (
+          <div
+            key={slot.id}
+            className="w-full overflow-hidden"
+            dangerouslySetInnerHTML={{ __html: slot.htmlCode }}
+          />
+        ))}
+      </div>
     );
   };
 
-  const handleSelectLanguage = (langCode: string) => {
+  const handleSelectLanguage = (langCode: string, isManualSelection = true) => {
     let nextRoute: ActiveRoute = route;
+
+    if (isManualSelection && typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(USER_LANG_OVERRIDE_KEY, langCode);
+      } catch {
+        // ignore
+      }
+    }
 
     if (route.view === 'blog-post') {
       const currentPost = cms.blogPosts.find((p) => p.slug === route.slug);
@@ -262,6 +417,18 @@ export default function App() {
 
     handleUpdateCms({ ...cms, activeLanguage: langCode });
     setRoute(nextRoute);
+  };
+
+  const handleAutoDetectBrowserLanguage = () => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(USER_LANG_OVERRIDE_KEY);
+      } catch {
+        // ignore
+      }
+    }
+    const detected = detectBrowserAndRegionLanguage(cms.languages, true);
+    handleSelectLanguage(detected.matchedCode, false);
   };
 
   const raceViaRelayNodes = async (targetUrl: string, timeoutMs = 5500): Promise<string | null> => {
@@ -534,6 +701,39 @@ export default function App() {
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
+  const [headerLangDropdownOpen, setHeaderLangDropdownOpen] = useState(false);
+  const [headerPagesDropdownOpen, setHeaderPagesDropdownOpen] = useState(false);
+  const [mobileMenuDrawerOpen, setMobileMenuDrawerOpen] = useState(false);
+
+  const readingAndLayout = cms.readingAndLayout || DEFAULT_READING_AND_LAYOUT;
+
+  const enabledLanguages = useMemo(
+    () => cms.languages.filter((l) => l.enabled),
+    [cms.languages]
+  );
+
+  const detectedBrowserLangInfo = useMemo(
+    () => detectBrowserAndRegionLanguage(cms.languages, true),
+    [cms.languages]
+  );
+
+  // Automatically sync browser/region language if autoDetectBrowserLanguage is enabled and user hasn't manually overridden
+  useEffect(() => {
+    if (!readingAndLayout.autoDetectBrowserLanguage) return;
+    const manualOverride =
+      typeof window !== 'undefined' ? localStorage.getItem(USER_LANG_OVERRIDE_KEY) : null;
+    if (manualOverride) return;
+
+    const detected = detectBrowserAndRegionLanguage(cms.languages, true);
+    if (
+      detected.matchedCode &&
+      detected.matchedCode !== cms.activeLanguage &&
+      cms.languages.some((l) => l.code === detected.matchedCode && l.enabled)
+    ) {
+      handleSelectLanguage(detected.matchedCode, false);
+    }
+  }, [readingAndLayout.autoDetectBrowserLanguage, cms.languages]);
+
   const visibleBlogPosts = useMemo(() => {
     const byLang = cms.blogPosts.filter(
       (p) => p.lang === cms.activeLanguage && p.status === 'published'
@@ -565,169 +765,469 @@ export default function App() {
     [cms.pages, cms.activeLanguage]
   );
 
+  const contactPageSlug = readingAndLayout.contactButtonPageSlug || 'contact-us';
+
+  // STANDALONE /kmg ADMIN PORTAL (Completely separated from User Frontend)
+  if (route.view === 'admin') {
+    if (!isAdminAuth) {
+      return (
+        <AdminLogin
+          onLoginSuccess={() => setIsAdminAuth(true)}
+          onBackToSite={() => setRoute({ view: 'home' })}
+        />
+      );
+    }
+
+    return (
+      <AdminDashboard
+        cms={cms}
+        onUpdateCms={handleUpdateCms}
+        onExitAdmin={() => setRoute({ view: 'home' })}
+        onLogoutAdmin={() => {
+          logoutAdminSession();
+          setIsAdminAuth(false);
+        }}
+        onPreviewBlogPost={(slug) => setRoute({ view: 'blog-post', slug })}
+        onPreviewCustomPage={(slug) => setRoute({ view: 'custom-page', slug })}
+      />
+    );
+  }
+
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
-      {/* Top Bar Contract: 3 Zones separated by gap-8 */}
-      <header className="flex items-center justify-between gap-8 px-6 py-4 bg-white border-b border-slate-200 sticky top-0 z-30 no-print">
-        <a
-          href="#top"
-          onClick={(e) => {
-            e.preventDefault();
-            setRoute({ view: 'home' });
-          }}
-          className="text-lg font-bold tracking-tight text-slate-900 font-display whitespace-nowrap shrink-0"
-        >
-          ScribdDownloader
-        </a>
-
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
+    <div
+      className="min-h-screen flex flex-col bg-slate-50 text-slate-900"
+      onClick={() => {
+        if (headerLangDropdownOpen) setHeaderLangDropdownOpen(false);
+        if (headerPagesDropdownOpen) setHeaderPagesDropdownOpen(false);
+      }}
+    >
+      {/* Public Header Matching Uploaded Screenshot Design */}
+      <header className="bg-white border-b border-slate-200/90 sticky top-0 z-40 no-print">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3 sm:gap-6">
+          {/* Left: Dark Navy Capsule Document-Download Icon + Stacked Scribd / Downloader Brand */}
           <a
-            href="#downloader"
+            href="#top"
             onClick={(e) => {
               e.preventDefault();
               setRoute({ view: 'home' });
+              setMobileMenuDrawerOpen(false);
             }}
-            className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 ${
-              route.view === 'home' ? 'text-slate-900 font-semibold' : ''
-            }`}
+            className="flex items-center gap-3 shrink-0 group cursor-pointer"
           >
-            {t.navDownloader}
+            <div className="w-11 h-12 rounded-2xl bg-[#0f172a] text-white flex items-center justify-center shadow-xs group-hover:bg-slate-800 transition-colors shrink-0">
+              <FileDown className="w-5 h-5 text-white stroke-[2.2]" />
+            </div>
+            <div className="flex flex-col justify-center leading-none">
+              <span className="text-[20px] sm:text-[22px] font-extrabold text-[#0f172a] tracking-tight font-display leading-none">
+                {readingAndLayout.brandTopTitle || 'Scribd'}
+              </span>
+              <span className="text-[20px] sm:text-[22px] font-extrabold bg-gradient-to-r from-[#5b5bd6] via-[#2563eb] to-[#06b6d4] bg-clip-text text-transparent tracking-tight font-display leading-tight mt-0.5">
+                {readingAndLayout.brandBottomTitle || 'Downloader'}
+              </span>
+            </div>
           </a>
 
-          <a
-            href="#blog"
-            onClick={(e) => {
-              e.preventDefault();
-              setRoute({ view: 'blog-list' });
-            }}
-            className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 ${
-              route.view === 'blog-list' || route.view === 'blog-post'
-                ? 'text-slate-900 font-semibold'
-                : ''
-            }`}
-          >
-            {t.navBlog}
-          </a>
-
-          <a
-            href="#tutorial"
-            onClick={(e) => {
-              e.preventDefault();
-              setRoute({ view: 'home' });
-              setTimeout(() => {
-                document.getElementById('tutorial')?.scrollIntoView({ behavior: 'smooth' });
-              }, 50);
-            }}
-            className="hover:text-slate-900 transition-colors whitespace-nowrap shrink-0"
-          >
-            {t.navTutorial}
-          </a>
-
-          {headerCustomPages.slice(0, 2).map((pg) => (
+          {/* Center Desktop Navigation: Home, Blogs, Pages Dropdown, Contact */}
+          <nav className="hidden lg:flex items-center gap-6 text-sm font-semibold text-slate-700">
             <a
-              key={pg.id}
-              href={`#page-${pg.slug}`}
+              href="/"
               onClick={(e) => {
                 e.preventDefault();
-                setRoute({ view: 'custom-page', slug: pg.slug });
+                setRoute({ view: 'home' });
               }}
-              className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 ${
-                route.view === 'custom-page' && route.slug === pg.slug
-                  ? 'text-slate-900 font-semibold'
-                  : ''
+              className={`hover:text-blue-600 transition-colors cursor-pointer ${
+                route.view === 'home' ? 'text-blue-600 font-bold' : 'text-slate-700'
               }`}
             >
-              {pg.title}
+              Home
             </a>
-          ))}
-        </nav>
 
-        <div className="flex items-center shrink-0">
-          <button
-            type="button"
-            onClick={() =>
-              setRoute(route.view === 'admin' ? { view: 'home' } : { view: 'admin' })
-            }
-            className="px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 cursor-pointer"
-          >
-            <Settings className="w-3.5 h-3.5" />
-            <span>{route.view === 'admin' ? t.navDownloader : t.navAdmin}</span>
-          </button>
-        </div>
-      </header>
+            <a
+              href="/blog"
+              onClick={(e) => {
+                e.preventDefault();
+                setRoute({ view: 'blog-list' });
+              }}
+              className={`hover:text-blue-600 transition-colors cursor-pointer ${
+                route.view === 'blog-list' || route.view === 'blog-post'
+                  ? 'text-blue-600 font-bold'
+                  : 'text-slate-700'
+              }`}
+            >
+              {t.navBlog || 'Blogs'}
+            </a>
 
-      {/* Polylang Language Switcher Bar */}
-      {route.view !== 'admin' && (
-        <div className="bg-slate-100 border-b border-slate-200 px-6 py-2 no-print">
-          <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-3 md:hidden">
-              <button
-                type="button"
-                onClick={() => setRoute({ view: 'home' })}
-                className="font-medium text-slate-700 hover:text-slate-900 cursor-pointer"
-              >
-                {t.navDownloader}
-              </button>
-              <span>·</span>
-              <button
-                type="button"
-                onClick={() => setRoute({ view: 'blog-list' })}
-                className="font-medium text-slate-700 hover:text-slate-900 cursor-pointer"
-              >
-                {t.navBlog}
-              </button>
-            </div>
-
-            <div className="flex items-center gap-1.5 flex-wrap ml-auto">
-              <Globe className="w-3.5 h-3.5 text-slate-500 mr-1" />
-              {cms.languages
-                .filter((l) => l.enabled)
-                .map((lang) => (
+            {/* Pages Dropdown in Desktop Header */}
+            {readingAndLayout.showImportantPagesDropdownInHeader &&
+              headerCustomPages.length > 0 && (
+                <div
+                  className="relative"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <button
-                    key={lang.code}
                     type="button"
-                    onClick={() => handleSelectLanguage(lang.code)}
-                    className={`px-2.5 py-1 rounded text-xs transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
-                      cms.activeLanguage === lang.code
-                        ? 'bg-white text-slate-900 font-semibold shadow-2xs border border-slate-200/80'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+                    onClick={() => {
+                      setHeaderPagesDropdownOpen((prev) => !prev);
+                      setHeaderLangDropdownOpen(false);
+                    }}
+                    className={`px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-colors flex items-center gap-1 text-sm font-semibold cursor-pointer ${
+                      route.view === 'custom-page' && route.slug !== contactPageSlug
+                        ? 'text-blue-600 font-bold'
+                        : 'text-slate-700'
                     }`}
                   >
-                    <span>{lang.flag}</span>
-                    <span>{lang.nativeName}</span>
+                    <span>Pages</span>
+                    <ChevronDown className="w-4 h-4 text-slate-400" />
                   </button>
-                ))}
-            </div>
+
+                  {headerPagesDropdownOpen && (
+                    <div className="absolute left-0 mt-2 w-56 bg-white border border-slate-200 rounded-2xl shadow-xl py-2 z-50">
+                      <div className="px-3.5 py-1.5 text-[10px] font-mono font-bold text-slate-400 uppercase border-b border-slate-100">
+                        Important & Legal Pages
+                      </div>
+                      {headerCustomPages.map((pg) => {
+                        const isCurrent =
+                          route.view === 'custom-page' && route.slug === pg.slug;
+                        return (
+                          <button
+                            key={pg.id}
+                            type="button"
+                            onClick={() => {
+                              setRoute({ view: 'custom-page', slug: pg.slug });
+                              setHeaderPagesDropdownOpen(false);
+                            }}
+                            className={`w-full px-3.5 py-2 text-left text-xs flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer ${
+                              isCurrent
+                                ? 'font-bold text-blue-600 bg-blue-50/50'
+                                : 'text-slate-700 font-medium'
+                            }`}
+                          >
+                            <span className="truncate">{pg.title}</span>
+                            {isCurrent && (
+                              <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+            <a
+              href={`/p/${contactPageSlug}`}
+              onClick={(e) => {
+                e.preventDefault();
+                setRoute({ view: 'custom-page', slug: contactPageSlug });
+              }}
+              className={`hover:text-blue-600 transition-colors cursor-pointer ${
+                route.view === 'custom-page' && route.slug === contactPageSlug
+                  ? 'text-blue-600 font-bold'
+                  : 'text-slate-700'
+              }`}
+            >
+              Contact
+            </a>
+          </nav>
+
+          {/* Right Action Controls: Rounded Pill Language Switcher (🇺🇸 EN ⌄) + Dark Navy Contact Us Button + Hamburger Menu (☰) */}
+          <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+            {/* Rounded Pill Language Switcher matching screenshot */}
+            {readingAndLayout.showLanguageDropdownInHeader &&
+              enabledLanguages.length > 0 && (
+                <div
+                  className="relative"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHeaderLangDropdownOpen((prev) => !prev);
+                      setHeaderPagesDropdownOpen(false);
+                    }}
+                    className="px-3.5 py-2 rounded-full bg-white hover:bg-slate-50 border border-slate-200 shadow-2xs flex items-center gap-2 text-xs sm:text-sm font-bold text-[#0f172a] transition-colors cursor-pointer whitespace-nowrap"
+                    title="Switch Language (Auto-detects Browser & Region)"
+                  >
+                    <span className="text-base leading-none">{activeLangObj.flag}</span>
+                    <span className="tracking-wide uppercase">
+                      {activeLangObj.code.toUpperCase()}
+                    </span>
+                    <ChevronDown className="w-4 h-4 text-slate-500 stroke-[2.2]" />
+                  </button>
+
+                  {headerLangDropdownOpen && (
+                    <div className="absolute right-0 mt-2.5 w-64 bg-white border border-slate-200 rounded-2xl shadow-xl py-2 z-50">
+                      <div className="px-3.5 py-2 border-b border-slate-100 flex items-center justify-between gap-2">
+                        <div>
+                          <div className="text-[10px] font-mono font-bold text-slate-400 uppercase">
+                            Language & Region
+                          </div>
+                          <div className="text-[11px] text-slate-600 font-medium">
+                            Browser: {detectedBrowserLangInfo.browserLocale} ({detectedBrowserLangInfo.detectedRegion})
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleAutoDetectBrowserLanguage();
+                            setHeaderLangDropdownOpen(false);
+                          }}
+                          className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-[10px] font-bold cursor-pointer whitespace-nowrap"
+                          title="Automatically switch to your browser & region language"
+                        >
+                          ⚡ Auto ({detectedBrowserLangInfo.matchedCode.toUpperCase()})
+                        </button>
+                      </div>
+
+                      <div className="max-h-72 overflow-y-auto py-1">
+                        {enabledLanguages.map((lang) => {
+                          const isSelected = cms.activeLanguage === lang.code;
+                          return (
+                            <button
+                              key={lang.code}
+                              type="button"
+                              onClick={() => {
+                                handleSelectLanguage(lang.code, true);
+                                setHeaderLangDropdownOpen(false);
+                              }}
+                              className={`w-full px-3.5 py-2.5 text-left text-xs flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer ${
+                                isSelected
+                                  ? 'bg-blue-50/70 text-blue-700 font-bold'
+                                  : 'text-slate-700 font-medium'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5">
+                                <span className="text-base">{lang.flag}</span>
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold uppercase">
+                                      {lang.code.toUpperCase()}
+                                    </span>
+                                    <span>·</span>
+                                    <span>{lang.nativeName}</span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 font-normal">
+                                    {lang.name}
+                                    {lang.regions && lang.regions.length > 0
+                                      ? ` (${lang.regions.slice(0, 3).join(', ')})`
+                                      : ''}
+                                  </div>
+                                </div>
+                              </div>
+                              {isSelected && (
+                                <Check className="w-4 h-4 text-blue-600 shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+            {/* Dark Navy "Contact Us" Pill Button matching screenshot */}
+            {readingAndLayout.showContactButtonInHeader !== false && (
+              <button
+                type="button"
+                onClick={() => {
+                  setRoute({ view: 'custom-page', slug: contactPageSlug });
+                  setMobileMenuDrawerOpen(false);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="px-4 sm:px-5 py-2.5 rounded-2xl bg-[#0f172a] hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-xs transition-colors cursor-pointer shrink-0"
+              >
+                <Mail className="w-4 h-4 text-white shrink-0" />
+                <span className="leading-tight">
+                  {readingAndLayout.contactButtonText || 'Contact Us'}
+                </span>
+              </button>
+            )}
+
+            {/* Hamburger Menu Button (☰) on Far Right matching screenshot */}
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuDrawerOpen((prev) => !prev);
+                setHeaderLangDropdownOpen(false);
+                setHeaderPagesDropdownOpen(false);
+              }}
+              className="p-2 rounded-xl text-[#0f172a] hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
+              aria-label="Open Navigation Menu"
+              title="Navigation Menu (Home, Blogs, Pages, Contact, Languages)"
+            >
+              {mobileMenuDrawerOpen ? (
+                <X className="w-6 h-6 stroke-[2.2]" />
+              ) : (
+                <Menu className="w-6 h-6 stroke-[2.2]" />
+              )}
+            </button>
           </div>
         </div>
-      )}
 
-      {/* ADMIN PANEL VIEW */}
-      {route.view === 'admin' && (
-        <AdminDashboard
-          cms={cms}
-          onUpdateCms={handleUpdateCms}
-          onExitAdmin={() => setRoute({ view: 'home' })}
-          onPreviewBlogPost={(slug) => setRoute({ view: 'blog-post', slug })}
-          onPreviewCustomPage={(slug) => setRoute({ view: 'custom-page', slug })}
-        />
-      )}
+        {/* Slide-Down Navigation Menu Drawer (Opened via ☰ Hamburger Icon) */}
+        {mobileMenuDrawerOpen && (
+          <div className="bg-white border-t border-slate-200 shadow-lg px-4 sm:px-6 py-5 space-y-5">
+            <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Column 1: Main Navigation (Home, Blogs, Contact) */}
+              <div className="space-y-2">
+                <div className="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider">
+                  Main Navigation
+                </div>
+                <div className="flex flex-col gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRoute({ view: 'home' });
+                      setMobileMenuDrawerOpen(false);
+                    }}
+                    className={`px-3.5 py-2.5 rounded-xl text-left text-sm font-bold flex items-center justify-between cursor-pointer ${
+                      route.view === 'home'
+                        ? 'bg-blue-50 text-blue-700'
+                        : 'text-slate-800 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>Home Page ({t.navDownloader})</span>
+                    {route.view === 'home' && <Check className="w-4 h-4 text-blue-600" />}
+                  </button>
 
-      {/* PUBLIC VIEWS */}
-      {route.view !== 'admin' && (
-        <main id="top" className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-8 space-y-8">
-          {renderAdSlot('header-leaderboard')}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRoute({ view: 'blog-list' });
+                      setMobileMenuDrawerOpen(false);
+                    }}
+                    className={`px-3.5 py-2.5 rounded-xl text-left text-sm font-bold flex items-center justify-between cursor-pointer ${
+                      route.view === 'blog-list' || route.view === 'blog-post'
+                        ? 'bg-blue-50 text-blue-700'
+                        : 'text-slate-800 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>Blogs & Guides ({t.navBlog})</span>
+                    {(route.view === 'blog-list' || route.view === 'blog-post') && (
+                      <Check className="w-4 h-4 text-blue-600" />
+                    )}
+                  </button>
 
-          {route.view === 'home' && (
-            <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRoute({ view: 'custom-page', slug: contactPageSlug });
+                      setMobileMenuDrawerOpen(false);
+                    }}
+                    className={`px-3.5 py-2.5 rounded-xl text-left text-sm font-bold flex items-center justify-between cursor-pointer ${
+                      route.view === 'custom-page' && route.slug === contactPageSlug
+                        ? 'bg-blue-50 text-blue-700'
+                        : 'text-slate-800 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>{readingAndLayout.contactButtonText || 'Contact Us'}</span>
+                    {route.view === 'custom-page' && route.slug === contactPageSlug && (
+                      <Check className="w-4 h-4 text-blue-600" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Column 2: Important & Legal Pages */}
+              <div className="space-y-2">
+                <div className="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider">
+                  Pages ({headerCustomPages.length})
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {headerCustomPages.map((pg) => {
+                    const isCurrent =
+                      route.view === 'custom-page' && route.slug === pg.slug;
+                    return (
+                      <button
+                        key={pg.id}
+                        type="button"
+                        onClick={() => {
+                          setRoute({ view: 'custom-page', slug: pg.slug });
+                          setMobileMenuDrawerOpen(false);
+                        }}
+                        className={`px-3 py-2 rounded-xl text-left text-xs font-semibold flex items-center justify-between cursor-pointer ${
+                          isCurrent
+                            ? 'bg-blue-50 text-blue-700 font-bold'
+                            : 'text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span className="truncate">{pg.title}</span>
+                        {isCurrent && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Column 3: Language Switcher (Browser & Region Auto-Switch) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider">
+                    Language Switcher
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleAutoDetectBrowserLanguage();
+                      setMobileMenuDrawerOpen(false);
+                    }}
+                    className="text-[11px] font-bold text-blue-600 hover:underline cursor-pointer"
+                  >
+                    ⚡ Auto ({detectedBrowserLangInfo.browserLocale})
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {enabledLanguages.map((lang) => {
+                    const isSelected = cms.activeLanguage === lang.code;
+                    return (
+                      <button
+                        key={lang.code}
+                        type="button"
+                        onClick={() => {
+                          handleSelectLanguage(lang.code, true);
+                          setMobileMenuDrawerOpen(false);
+                        }}
+                        className={`px-3 py-1.5 rounded-full border text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
+                          isSelected
+                            ? 'bg-[#0f172a] text-white border-[#0f172a]'
+                            : 'bg-slate-50 text-slate-800 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span>{lang.flag}</span>
+                        <span>{lang.code.toUpperCase()}</span>
+                        <span className="font-normal opacity-80">({lang.nativeName})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </header>
+
+      {/* PUBLIC USER VIEWS */}
+      <main id="top" className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-8 space-y-8">
+        {renderAdSlot('header-leaderboard')}
+
+        {(() => {
+          const renderInteractiveDownloaderSection = (isShortcodeEmbed = false) => (
+            <div className="space-y-6">
               <section
-                id="downloader"
+                id={isShortcodeEmbed ? undefined : 'downloader'}
                 className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 shadow-xs no-print"
               >
                 <div className="text-center max-w-2xl mx-auto">
-                  <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 font-display tracking-tight">
-                    {t.heroTitle}
-                  </h1>
+                  {isShortcodeEmbed ? (
+                    <h2 className="text-xl sm:text-2xl font-bold text-slate-900 font-display tracking-tight">
+                      {t.heroTitle}
+                    </h2>
+                  ) : (
+                    <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 font-display tracking-tight">
+                      {t.heroTitle}
+                    </h1>
+                  )}
                   <p className="text-sm text-slate-600 mt-2">
                     {t.heroSubtitle}
                   </p>
@@ -970,13 +1470,13 @@ export default function App() {
                 )}
               </section>
 
-              {renderAdSlot('below-downloader-banner')}
+              {!isShortcodeEmbed && renderAdSlot('below-downloader-banner')}
 
               {currentDoc && (
                 <>
-                  {renderAdSlot('above-viewer-banner')}
+                  {!isShortcodeEmbed && renderAdSlot('above-viewer-banner')}
                   <section
-                    id="viewer"
+                    id={isShortcodeEmbed ? undefined : 'viewer'}
                     className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs"
                   >
                     <div className="p-5 bg-slate-900 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-4 no-print">
@@ -1145,337 +1645,560 @@ export default function App() {
                   </section>
                 </>
               )}
+            </div>
+          );
 
-              {renderAdSlot('in-article-tutorial')}
+          return (
+            <>
+              {route.view === 'home' && (() => {
+                // Check if Admin manually selected a Static Page as the Homepage (Front Page)
+                if (readingAndLayout.homepageMode === 'static-page') {
+                  const baseHomePg =
+                    cms.pages.find(
+                      (p) =>
+                        p.id === readingAndLayout.homepageStaticPageId ||
+                        p.slug === readingAndLayout.homepageStaticPageId
+                    ) || cms.pages[0];
 
-              {/* Step-by-Step Tutorial Section */}
-              <section
-                id="tutorial"
-                className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-6 no-print"
-              >
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900 font-display">
-                    {t.tutorialHeading}
-                  </h2>
-                  <p className="text-sm text-slate-600 mt-1">
-                    {t.tutorialSubheading}
-                  </p>
-                </div>
+                  const activeHomePg = baseHomePg
+                    ? cms.pages.find(
+                        (p) =>
+                          p.translationGroupId === baseHomePg.translationGroupId &&
+                          p.lang === cms.activeLanguage
+                      ) || baseHomePg
+                    : null;
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                  <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
-                    <div className="text-xs font-mono font-bold text-blue-600">
-                      01. STEP 1
-                    </div>
-                    <h3 className="text-base font-bold text-slate-900">
-                      {t.step1Title}
-                    </h3>
-                    <p className="text-xs text-slate-600 leading-relaxed">
-                      {t.step1Desc}
-                    </p>
-                  </div>
+                  if (activeHomePg) {
+                    return (
+                      <div className="space-y-6">
+                        {readingAndLayout.showDownloaderOnStaticHome &&
+                          renderInteractiveDownloaderSection(false)}
 
-                  <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
-                    <div className="text-xs font-mono font-bold text-blue-600">
-                      02. STEP 2
-                    </div>
-                    <h3 className="text-base font-bold text-slate-900">
-                      {t.step2Title}
-                    </h3>
-                    <p className="text-xs text-slate-600 leading-relaxed">
-                      {t.step2Desc}
-                    </p>
-                  </div>
+                        <article className="bg-white border border-slate-200 rounded-xl p-6 sm:p-10 space-y-6">
+                          {renderRichContentWithDownloader(
+                            activeHomePg.contentHtml,
+                            cms.shortcodes,
+                            () => renderInteractiveDownloaderSection(true)
+                          )}
+                        </article>
 
-                  <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
-                    <div className="text-xs font-mono font-bold text-blue-600">
-                      03. STEP 3
-                    </div>
-                    <h3 className="text-base font-bold text-slate-900">
-                      {t.step3Title}
-                    </h3>
-                    <p className="text-xs text-slate-600 leading-relaxed">
-                      {t.step3Desc}
-                    </p>
-                  </div>
-                </div>
-              </section>
+                        <MultiContentSwitcher
+                          sections={activeHomePg.switcherSections}
+                          shortcodes={cms.shortcodes}
+                          renderDownloaderWidget={() =>
+                            renderInteractiveDownloaderSection(true)
+                          }
+                        />
+                      </div>
+                    );
+                  }
+                }
 
-              {/* HOMEPAGE INTERACTIVE MULTI-CONTENT SWITCHER */}
-              <MultiContentSwitcher sections={t.homeSwitcherSections} />
+                // Default Built-In Scribd Downloader Homepage
+                return (
+                  <>
+                    {renderInteractiveDownloaderSection(false)}
 
-              {/* Additional Custom Homepage HTML Block (Configured in WordPress Editor) */}
-              {t.customHomeHtml && (
-                <section
-                  className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 prose prose-slate max-w-none text-sm no-print"
-                  dangerouslySetInnerHTML={{ __html: t.customHomeHtml }}
-                />
-              )}
+                    {renderAdSlot('in-article-tutorial')}
 
-              {/* Latest Blog Articles Preview on Homepage */}
-              {visibleBlogPosts.length > 0 && (
-                <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-5 no-print">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-lg font-bold text-slate-900 font-display flex items-center gap-2">
-                      <BookOpen className="w-4 h-4 text-blue-600" />
-                      <span>{t.navBlog} & Guides</span>
-                    </h2>
-                    <button
-                      type="button"
-                      onClick={() => setRoute({ view: 'blog-list' })}
-                      className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
+                    {/* Step-by-Step Tutorial Section */}
+                    <section
+                      id="tutorial"
+                      className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-6 no-print"
                     >
-                      View All Articles →
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    {visibleBlogPosts.slice(0, 2).map((post) => (
-                      <article
-                        key={post.id}
-                        onClick={() => setRoute({ view: 'blog-post', slug: post.slug })}
-                        className="p-5 bg-slate-50 border border-slate-200 rounded-xl hover:border-blue-400 transition-colors cursor-pointer space-y-2"
-                      >
-                        <div className="text-xs text-slate-500 font-mono">
-                          {post.publishedAt} · {post.author}
-                        </div>
-                        <h3 className="text-base font-bold text-slate-900 leading-snug">
-                          {post.title}
-                        </h3>
-                        <p className="text-xs text-slate-600 leading-relaxed line-clamp-2">
-                          {post.excerpt}
+                      <div>
+                        <h2 className="text-xl font-bold text-slate-900 font-display">
+                          {t.tutorialHeading}
+                        </h2>
+                        <p className="text-sm text-slate-600 mt-1">
+                          {t.tutorialSubheading}
                         </p>
-                      </article>
-                    ))}
-                  </div>
-                </section>
-              )}
-            </>
-          )}
+                      </div>
 
-          {/* VIEW B: BLOG LIST */}
-          {route.view === 'blog-list' && (
-            <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-6">
-              <div className="flex items-center justify-between border-b border-slate-200 pb-4">
-                <div>
-                  <h1 className="text-2xl font-bold text-slate-900 font-display">
-                    {t.navBlog} & Documentation ({activeLangObj.nativeName})
-                  </h1>
-                  <p className="text-xs text-slate-600 mt-1">
-                    Guides, tutorials, and technical articles managed via the WordPress Editor & Polylang engine.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setRoute({ view: 'home' })}
-                  className="px-3.5 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg flex items-center gap-1.5 cursor-pointer"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>{t.navDownloader}</span>
-                </button>
-              </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                        <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                          <div className="text-xs font-mono font-bold text-blue-600">
+                            01. STEP 1
+                          </div>
+                          <h3 className="text-base font-bold text-slate-900">
+                            {t.step1Title}
+                          </h3>
+                          <p className="text-xs text-slate-600 leading-relaxed">
+                            {t.step1Desc}
+                          </p>
+                        </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {visibleBlogPosts.map((post) => (
-                  <article
-                    key={post.id}
-                    onClick={() => setRoute({ view: 'blog-post', slug: post.slug })}
-                    className="p-6 bg-slate-50 border border-slate-200 rounded-xl hover:border-blue-500 transition-colors cursor-pointer space-y-3"
-                  >
-                    <div className="flex items-center gap-2 text-xs text-slate-500 font-mono">
-                      <span>{post.publishedAt}</span>
-                      <span>·</span>
-                      <span>{post.author}</span>
-                    </div>
-                    <h2 className="text-lg font-bold text-slate-900 font-display">
-                      {post.title}
-                    </h2>
-                    <p className="text-xs text-slate-600 leading-relaxed">
-                      {post.excerpt}
-                    </p>
-                    <div className="text-xs font-semibold text-blue-600 pt-1">
-                      Read Full Article →
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-          )}
+                        <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                          <div className="text-xs font-mono font-bold text-blue-600">
+                            02. STEP 2
+                          </div>
+                          <h3 className="text-base font-bold text-slate-900">
+                            {t.step2Title}
+                          </h3>
+                          <p className="text-xs text-slate-600 leading-relaxed">
+                            {t.step2Desc}
+                          </p>
+                        </div>
 
-          {/* VIEW C: SINGLE BLOG POST */}
-          {route.view === 'blog-post' && (() => {
-            const post = cms.blogPosts.find((p) => p.slug === route.slug);
-            if (!post) {
-              return (
-                <div className="bg-white border border-slate-200 rounded-xl p-8 text-center space-y-3">
-                  <p className="text-sm text-slate-600">Article not found.</p>
-                  <button
-                    type="button"
-                    onClick={() => setRoute({ view: 'blog-list' })}
-                    className="px-4 py-2 text-xs font-semibold bg-slate-900 text-white rounded-lg cursor-pointer"
-                  >
-                    Back to Blog
-                  </button>
-                </div>
-              );
-            }
-            return (
-              <article className="bg-white border border-slate-200 rounded-xl p-6 sm:p-10 space-y-6">
-                <div className="flex items-center justify-between">
-                  <button
-                    type="button"
-                    onClick={() => setRoute({ view: 'blog-list' })}
-                    className="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1 cursor-pointer"
-                  >
-                    <ArrowLeft className="w-3.5 h-3.5" />
-                    <span>Back to {t.navBlog}</span>
-                  </button>
+                        <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                          <div className="text-xs font-mono font-bold text-blue-600">
+                            03. STEP 3
+                          </div>
+                          <h3 className="text-base font-bold text-slate-900">
+                            {t.step3Title}
+                          </h3>
+                          <p className="text-xs text-slate-600 leading-relaxed">
+                            {t.step3Desc}
+                          </p>
+                        </div>
+                      </div>
+                    </section>
 
-                  <div className="flex items-center gap-1.5">
-                    {cms.languages
-                      .filter((l) => l.enabled)
-                      .map((l) => {
-                        const trans = cms.blogPosts.find(
-                          (p) =>
-                            p.translationGroupId === post.translationGroupId &&
-                            p.lang === l.code
-                        );
-                        if (!trans) return null;
-                        return (
+                    {/* HOMEPAGE INTERACTIVE MULTI-CONTENT SWITCHER */}
+                    <MultiContentSwitcher
+                      sections={t.homeSwitcherSections}
+                      shortcodes={cms.shortcodes}
+                      renderDownloaderWidget={() => renderInteractiveDownloaderSection(true)}
+                    />
+
+                    {/* Additional Custom Homepage HTML Block (Configured in WordPress Editor + Shortcodes) */}
+                    {t.customHomeHtml && (
+                      <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 no-print">
+                        {renderRichContentWithDownloader(
+                          t.customHomeHtml,
+                          cms.shortcodes,
+                          () => renderInteractiveDownloaderSection(true)
+                        )}
+                      </section>
+                    )}
+
+                    {/* Latest Blog Articles Preview on Homepage */}
+                    {visibleBlogPosts.length > 0 && (
+                      <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-5 no-print">
+                        <div className="flex items-center justify-between">
+                          <h2 className="text-lg font-bold text-slate-900 font-display flex items-center gap-2">
+                            <BookOpen className="w-4 h-4 text-blue-600" />
+                            <span>{t.navBlog} & Guides</span>
+                          </h2>
                           <button
-                            key={l.code}
                             type="button"
-                            onClick={() => {
-                              handleUpdateCms({ ...cms, activeLanguage: l.code });
-                              setRoute({ view: 'blog-post', slug: trans.slug });
-                            }}
-                            className={`px-2 py-1 text-xs rounded border cursor-pointer ${
-                              post.lang === l.code
-                                ? 'bg-slate-900 text-white border-slate-900'
-                                : 'bg-slate-50 text-slate-700 border-slate-200'
-                            }`}
+                            onClick={() => setRoute({ view: 'blog-list' })}
+                            className="text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
                           >
-                            {l.flag} {l.nativeName}
+                            View All Articles →
                           </button>
-                        );
-                      })}
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                          {visibleBlogPosts.slice(0, 2).map((post) => (
+                            <article
+                              key={post.id}
+                              onClick={() => setRoute({ view: 'blog-post', slug: post.slug })}
+                              className="p-5 bg-slate-50 border border-slate-200 rounded-xl hover:border-blue-400 transition-colors cursor-pointer space-y-2"
+                            >
+                              <div className="text-xs text-slate-500 font-mono">
+                                {post.publishedAt} · {post.author}
+                              </div>
+                              <h3 className="text-base font-bold text-slate-900 leading-snug">
+                                {post.title}
+                              </h3>
+                              <p className="text-xs text-slate-600 leading-relaxed line-clamp-2">
+                                {post.excerpt}
+                              </p>
+                            </article>
+                          ))}
+                        </div>
+                      </section>
+                    )}
+                  </>
+                );
+              })()}
+
+              {/* VIEW B: BLOG LIST (Supports Manual Static Blog Page or Default Blog Archive) */}
+              {route.view === 'blog-list' && (() => {
+                const baseBlogPg =
+                  readingAndLayout.blogPageMode === 'static-page'
+                    ? cms.pages.find(
+                        (p) =>
+                          p.id === readingAndLayout.blogStaticPageId ||
+                          p.slug === readingAndLayout.blogStaticPageId
+                      )
+                    : null;
+
+                const activeStaticBlogPg = baseBlogPg
+                  ? cms.pages.find(
+                      (p) =>
+                        p.translationGroupId === baseBlogPg.translationGroupId &&
+                        p.lang === cms.activeLanguage
+                    ) || baseBlogPg
+                  : null;
+
+                return (
+                  <div className="space-y-6">
+                    {renderAdSlot('blog-top-banner')}
+                    {activeStaticBlogPg && (
+                      <>
+                        <article className="bg-white border border-slate-200 rounded-xl p-6 sm:p-10 space-y-6">
+                          <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+                            <h1 className="text-2xl font-bold text-slate-900 font-display">
+                              {activeStaticBlogPg.title}
+                            </h1>
+                            <button
+                              type="button"
+                              onClick={() => setRoute({ view: 'home' })}
+                              className="px-3.5 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <ArrowLeft className="w-3.5 h-3.5" />
+                              <span>{t.navDownloader}</span>
+                            </button>
+                          </div>
+
+                          {renderRichContentWithDownloader(
+                            activeStaticBlogPg.contentHtml,
+                            cms.shortcodes,
+                            () => renderInteractiveDownloaderSection(true)
+                          )}
+                        </article>
+
+                        <MultiContentSwitcher
+                          sections={activeStaticBlogPg.switcherSections}
+                          shortcodes={cms.shortcodes}
+                          renderDownloaderWidget={() =>
+                            renderInteractiveDownloaderSection(true)
+                          }
+                        />
+                      </>
+                    )}
+
+                    {(!activeStaticBlogPg ||
+                      readingAndLayout.showPostsListBelowStaticBlogPage) && (
+                      <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-6">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+                          <div>
+                            <h1 className="text-2xl font-bold text-slate-900 font-display">
+                              {t.navBlog} & Documentation ({activeLangObj.nativeName})
+                            </h1>
+                            <p className="text-xs text-slate-600 mt-1">
+                              Guides, tutorials, and technical articles managed via the WordPress Editor & Polylang engine.
+                            </p>
+                          </div>
+                          {!activeStaticBlogPg && (
+                            <button
+                              type="button"
+                              onClick={() => setRoute({ view: 'home' })}
+                              className="px-3.5 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <ArrowLeft className="w-3.5 h-3.5" />
+                              <span>{t.navDownloader}</span>
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          {visibleBlogPosts.map((post) => (
+                            <article
+                              key={post.id}
+                              onClick={() => setRoute({ view: 'blog-post', slug: post.slug })}
+                              className="p-6 bg-slate-50 border border-slate-200 rounded-xl hover:border-blue-500 transition-colors cursor-pointer space-y-3"
+                            >
+                              <div className="flex items-center gap-2 text-xs text-slate-500 font-mono">
+                                <span>{post.publishedAt}</span>
+                                <span>·</span>
+                                <span>{post.author}</span>
+                              </div>
+                              <h2 className="text-lg font-bold text-slate-900 font-display">
+                                {post.title}
+                              </h2>
+                              <p className="text-xs text-slate-600 leading-relaxed">
+                                {post.excerpt}
+                              </p>
+                              <div className="text-xs font-semibold text-blue-600 pt-1">
+                                Read Full Article →
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      </section>
+                    )}
                   </div>
-                </div>
+                );
+              })()}
 
-                <header className="space-y-2 border-b border-slate-200 pb-6">
-                  <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 font-display leading-tight">
-                    {post.title}
-                  </h1>
-                  <div className="flex items-center gap-4 text-xs text-slate-500 pt-1">
-                    <span className="flex items-center gap-1">
-                      <Calendar className="w-3.5 h-3.5" />
-                      <span>{post.publishedAt}</span>
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <User className="w-3.5 h-3.5" />
-                      <span>{post.author}</span>
-                    </span>
+              {/* VIEW C: SINGLE BLOG POST */}
+              {route.view === 'blog-post' && (() => {
+                const post = cms.blogPosts.find((p) => p.slug === route.slug);
+                if (!post) {
+                  return (
+                    <div className="bg-white border border-slate-200 rounded-xl p-8 text-center space-y-3">
+                      <p className="text-sm text-slate-600">Article not found.</p>
+                      <button
+                        type="button"
+                        onClick={() => setRoute({ view: 'blog-list' })}
+                        className="px-4 py-2 text-xs font-semibold bg-slate-900 text-white rounded-lg cursor-pointer"
+                      >
+                        Back to Blog
+                      </button>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="space-y-6">
+                    {renderAdSlot('blog-top-banner')}
+                    <article className="bg-white border border-slate-200 rounded-xl p-6 sm:p-10 space-y-6">
+                      <div className="flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => setRoute({ view: 'blog-list' })}
+                          className="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <ArrowLeft className="w-3.5 h-3.5" />
+                          <span>Back to {t.navBlog}</span>
+                        </button>
+
+                        <div className="flex items-center gap-1.5">
+                          {cms.languages
+                            .filter((l) => l.enabled)
+                            .map((l) => {
+                              const trans = cms.blogPosts.find(
+                                (p) =>
+                                  p.translationGroupId === post.translationGroupId &&
+                                  p.lang === l.code
+                              );
+                              if (!trans) return null;
+                              return (
+                                <button
+                                  key={l.code}
+                                  type="button"
+                                  onClick={() => {
+                                    handleUpdateCms({ ...cms, activeLanguage: l.code });
+                                    setRoute({ view: 'blog-post', slug: trans.slug });
+                                  }}
+                                  className={`px-2 py-1 text-xs rounded border cursor-pointer ${
+                                    post.lang === l.code
+                                      ? 'bg-slate-900 text-white border-slate-900'
+                                      : 'bg-slate-50 text-slate-700 border-slate-200'
+                                  }`}
+                                >
+                                  {l.flag} {l.nativeName}
+                                </button>
+                              );
+                            })}
+                        </div>
+                      </div>
+
+                      <header className="space-y-2 border-b border-slate-200 pb-6">
+                        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 font-display leading-tight">
+                          {post.title}
+                        </h1>
+                        <div className="flex items-center gap-4 text-xs text-slate-500 pt-1">
+                          <span className="flex items-center gap-1">
+                            <Calendar className="w-3.5 h-3.5" />
+                            <span>{post.publishedAt}</span>
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <User className="w-3.5 h-3.5" />
+                            <span>{post.author}</span>
+                          </span>
+                        </div>
+                      </header>
+
+                      {renderRichContentWithDownloader(
+                        post.contentHtml,
+                        cms.shortcodes,
+                        () => renderInteractiveDownloaderSection(true)
+                      )}
+                    </article>
                   </div>
-                </header>
+                );
+              })()}
 
-                <div
-                  className="prose prose-slate max-w-none text-sm leading-relaxed space-y-4"
-                  dangerouslySetInnerHTML={{ __html: post.contentHtml }}
-                />
-              </article>
-            );
-          })()}
+              {/* VIEW D: CUSTOM PAGE + SHORTCODES + PAGE MULTI-CONTENT SWITCHER */}
+              {route.view === 'custom-page' && (() => {
+                const pg = cms.pages.find((p) => p.slug === route.slug);
+                if (!pg) {
+                  return (
+                    <div className="bg-white border border-slate-200 rounded-xl p-8 text-center space-y-3">
+                      <p className="text-sm text-slate-600">Page not found.</p>
+                      <button
+                        type="button"
+                        onClick={() => setRoute({ view: 'home' })}
+                        className="px-4 py-2 text-xs font-semibold bg-slate-900 text-white rounded-lg cursor-pointer"
+                      >
+                        Back to Home
+                      </button>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="space-y-6">
+                    {renderAdSlot('page-top-banner')}
+                    <article className="bg-white border border-slate-200 rounded-xl p-6 sm:p-10 space-y-6">
+                      <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+                        <h1 className="text-2xl font-bold text-slate-900 font-display">
+                          {pg.title}
+                        </h1>
+                        <button
+                          type="button"
+                          onClick={() => setRoute({ view: 'home' })}
+                          className="px-3 py-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-1 cursor-pointer"
+                        >
+                          <ArrowLeft className="w-3.5 h-3.5" />
+                          <span>{t.navDownloader}</span>
+                        </button>
+                      </div>
 
-          {/* VIEW D: CUSTOM PAGE + PAGE MULTI-CONTENT SWITCHER */}
-          {route.view === 'custom-page' && (() => {
-            const pg = cms.pages.find((p) => p.slug === route.slug);
-            if (!pg) {
-              return (
-                <div className="bg-white border border-slate-200 rounded-xl p-8 text-center space-y-3">
-                  <p className="text-sm text-slate-600">Page not found.</p>
+                      {renderRichContentWithDownloader(
+                        pg.contentHtml,
+                        cms.shortcodes,
+                        () => renderInteractiveDownloaderSection(true)
+                      )}
+                    </article>
+
+                    {/* Render Interactive Multi-Content Switcher Tabs for this Page */}
+                    <MultiContentSwitcher
+                      sections={pg.switcherSections}
+                      shortcodes={cms.shortcodes}
+                      renderDownloaderWidget={() => renderInteractiveDownloaderSection(true)}
+                    />
+                  </div>
+                );
+              })()}
+            </>
+          );
+        })()}
+
+        {renderAdSlot('footer-sticky-banner')}
+      </main>
+
+      {/* Multi-Column User-Only Public Footer with Important Pages & Language Dropdown */}
+      <footer className="bg-white border-t border-slate-200 pt-10 pb-6 px-6 mt-auto no-print">
+        <div className="max-w-5xl mx-auto space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-xs text-slate-600">
+            {/* Column 1: Brand, Tagline & Footer Language Dropdown */}
+            <div className="space-y-3">
+              <div className="text-base font-bold text-slate-900 font-display">
+                {readingAndLayout.brandLogoText || 'ScribdDownloader'}
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                {readingAndLayout.footerTagline}
+              </p>
+
+              {readingAndLayout.showLanguageDropdownInFooter &&
+                enabledLanguages.length > 0 && (
+                  <div className="pt-1 space-y-1.5">
+                    <label className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5">
+                      <Globe className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Site Language:</span>
+                    </label>
+                    <select
+                      value={cms.activeLanguage}
+                      onChange={(e) => handleSelectLanguage(e.target.value)}
+                      className="w-full max-w-[220px] px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-300 rounded-lg text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-600 cursor-pointer"
+                    >
+                      {enabledLanguages.map((lang) => (
+                        <option key={lang.code} value={lang.code}>
+                          {lang.flag} {lang.nativeName} — {lang.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+            </div>
+
+            {/* Column 2: Quick Navigation */}
+            <div className="space-y-2.5">
+              <div className="text-xs font-bold text-slate-900 uppercase tracking-wider font-mono">
+                Quick Navigation
+              </div>
+              <ul className="space-y-2">
+                <li>
                   <button
                     type="button"
-                    onClick={() => setRoute({ view: 'home' })}
-                    className="px-4 py-2 text-xs font-semibold bg-slate-900 text-white rounded-lg cursor-pointer"
+                    onClick={() => {
+                      setRoute({ view: 'home' });
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="hover:text-blue-600 transition-colors cursor-pointer font-medium"
                   >
-                    Back to Home
+                    {t.navDownloader} (Home)
                   </button>
-                </div>
-              );
-            }
-            return (
-              <div className="space-y-6">
-                <article className="bg-white border border-slate-200 rounded-xl p-6 sm:p-10 space-y-6">
-                  <div className="flex items-center justify-between border-b border-slate-200 pb-4">
-                    <h1 className="text-2xl font-bold text-slate-900 font-display">
-                      {pg.title}
-                    </h1>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRoute({ view: 'blog-list' });
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="hover:text-blue-600 transition-colors cursor-pointer font-medium"
+                  >
+                    {t.navBlog} & Articles
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRoute({ view: 'home' });
+                      setTimeout(() => {
+                        document.getElementById('tutorial')?.scrollIntoView({ behavior: 'smooth' });
+                      }, 50);
+                    }}
+                    className="hover:text-blue-600 transition-colors cursor-pointer font-medium"
+                  >
+                    {t.navTutorial}
+                  </button>
+                </li>
+              </ul>
+            </div>
+
+            {/* Column 3: Important & Legal Pages */}
+            <div className="space-y-2.5">
+              <div className="text-xs font-bold text-slate-900 uppercase tracking-wider font-mono">
+                Important & Legal Pages
+              </div>
+              <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {footerCustomPages.map((pg) => (
+                  <li key={pg.id}>
                     <button
                       type="button"
-                      onClick={() => setRoute({ view: 'home' })}
-                      className="px-3 py-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-1 cursor-pointer"
+                      onClick={() => {
+                        setRoute({ view: 'custom-page', slug: pg.slug });
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="hover:text-blue-600 transition-colors cursor-pointer font-medium text-left"
                     >
-                      <ArrowLeft className="w-3.5 h-3.5" />
-                      <span>{t.navDownloader}</span>
+                      {pg.title}
                     </button>
-                  </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
 
-                  <div
-                    className="prose prose-slate max-w-none text-sm leading-relaxed space-y-4"
-                    dangerouslySetInnerHTML={{ __html: pg.contentHtml }}
-                  />
-                </article>
+          <div className="pt-5 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+            <span>
+              {readingAndLayout.footerCopyrightText ||
+                '© 2026 ScribdDownloader. All rights reserved.'}
+            </span>
 
-                {/* Render Interactive Multi-Content Switcher Tabs for this Page */}
-                <MultiContentSwitcher sections={pg.switcherSections} />
-              </div>
-            );
-          })()}
-
-          {renderAdSlot('footer-sticky-banner')}
-        </main>
-      )}
-
-      {/* Clean Footer */}
-      <footer className="bg-white border-t border-slate-200 py-5 px-6 mt-auto no-print">
-        <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
-          <span>ScribdDownloader — Free Online Document Viewer & PDF Extractor</span>
-          <div className="flex flex-wrap items-center gap-4">
-            <button
-              type="button"
-              onClick={() => setRoute({ view: 'home' })}
-              className="hover:text-slate-900 cursor-pointer"
-            >
-              {t.navDownloader}
-            </button>
-            <span>·</span>
-            <button
-              type="button"
-              onClick={() => setRoute({ view: 'blog-list' })}
-              className="hover:text-slate-900 cursor-pointer"
-            >
-              {t.navBlog}
-            </button>
-            {footerCustomPages.map((pg) => (
-              <React.Fragment key={pg.id}>
-                <span>·</span>
-                <button
-                  type="button"
-                  onClick={() => setRoute({ view: 'custom-page', slug: pg.slug })}
-                  className="hover:text-slate-900 cursor-pointer"
-                >
-                  {pg.title}
-                </button>
-              </React.Fragment>
-            ))}
-            <span>·</span>
-            <button
-              type="button"
-              onClick={() => setRoute({ view: 'admin' })}
-              className="hover:text-slate-900 font-medium cursor-pointer"
-            >
-              {t.navAdmin}
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              {footerCustomPages.slice(0, 4).map((pg, idx) => (
+                <React.Fragment key={pg.id}>
+                  {idx > 0 && <span>·</span>}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRoute({ view: 'custom-page', slug: pg.slug });
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="hover:text-slate-900 cursor-pointer"
+                  >
+                    {pg.title}
+                  </button>
+                </React.Fragment>
+              ))}
+            </div>
           </div>
         </div>
       </footer>
