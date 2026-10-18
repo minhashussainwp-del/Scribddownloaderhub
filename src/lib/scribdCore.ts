@@ -44,12 +44,13 @@ const BROWSER_UA =
 const DOCUMENT_CACHE = new Map<string, ScribdDocumentData>();
 const IMAGE_BYTE_CACHE = new Map<string, { bytes: Uint8Array; isPng: boolean }>();
 
-export function getRandomHeaders(targetUrl = '') {
+export function getRandomHeaders(targetUrl = ''): Record<string, string> {
   if (targetUrl.includes('translate.goog')) {
     return {
       'User-Agent': BROWSER_UA,
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.9'
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Cache-Control': 'no-cache'
     };
   }
 

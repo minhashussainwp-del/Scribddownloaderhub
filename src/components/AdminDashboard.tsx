@@ -35,9 +35,11 @@ import {
   ShortcodeItem,
   WORLD_LANGUAGE_PRESETS,
   detectBrowserAndRegionLanguage,
-  ADMIN_AUTHORIZED_EMAIL
+  ADMIN_AUTHORIZED_EMAIL,
+  computeYoastSeoAnalysis
 } from '../lib/cmsStore';
 import WordPressEditor from './WordPressEditor';
+import YoastSeoPanel from './YoastSeoPanel';
 
 interface AdminDashboardProps {
   cms: CmsStoreState;
@@ -1359,7 +1361,7 @@ export default function AdminDashboard({
 
                               <button
                                 type="button"
-                                onClick={() => handleDeletePage(pg.id)}
+                                onClick={() => handleDeleteCustomPage(pg.id)}
                                 className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
                                 title="Delete Page"
                               >
@@ -1798,6 +1800,37 @@ export default function AdminDashboard({
                     )}
                   </div>
 
+                  {/* YOAST SEO EMBEDDED METABOX FOR PAGES */}
+                  <div className="pt-2">
+                    <YoastSeoPanel
+                      title={editingPage.title}
+                      slug={`p/${editingPage.slug}`}
+                      contentHtml={editingPage.contentHtml}
+                      siteName="ScribdDownloader"
+                      seoData={{
+                        focusKeyphrase: editingPage.focusKeyphrase,
+                        seoTitle: editingPage.seoTitle,
+                        seoDescription: editingPage.seoDescription,
+                        canonicalUrl: editingPage.canonicalUrl,
+                        robotsIndex: editingPage.robotsIndex,
+                        robotsFollow: editingPage.robotsFollow,
+                        ogTitle: editingPage.ogTitle,
+                        ogDescription: editingPage.ogDescription,
+                        ogImageUrl: editingPage.ogImageUrl,
+                        twitterTitle: editingPage.twitterTitle,
+                        twitterDescription: editingPage.twitterDescription,
+                        schemaPageType: editingPage.schemaPageType || 'WebPage',
+                        isCornerstone: editingPage.isCornerstone
+                      }}
+                      onChange={(updated) =>
+                        setEditingPage({
+                          ...editingPage,
+                          ...updated
+                        })
+                      }
+                    />
+                  </div>
+
                   <div className="flex justify-end gap-2 pt-2">
                     <button
                       type="button"
@@ -1824,6 +1857,7 @@ export default function AdminDashboard({
                         <th className="py-2.5 px-4">Page Title, URL & Role</th>
                         <th className="py-2.5 px-4">Lang</th>
                         <th className="py-2.5 px-4">Menus</th>
+                        <th className="py-2.5 px-4">Yoast SEO</th>
                         <th className="py-2.5 px-4">Polylang Translations</th>
                         <th className="py-2.5 px-4 text-right">Actions</th>
                       </tr>
@@ -1837,6 +1871,12 @@ export default function AdminDashboard({
                         const isStaticBlog =
                           readingConfig.blogPageMode === 'static-page' &&
                           readingConfig.blogStaticPageId === pg.id;
+                        const yoastAnalysis = computeYoastSeoAnalysis(
+                          pg.title,
+                          pg.slug,
+                          pg.contentHtml,
+                          pg
+                        );
 
                         return (
                           <tr key={pg.id} className="hover:bg-slate-50">
@@ -1872,6 +1912,29 @@ export default function AdminDashboard({
                                   Footer
                                 </span>
                               )}
+                            </td>
+                            <td className="py-3 px-4 whitespace-nowrap">
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                                    yoastAnalysis.overallScore === 'good'
+                                      ? 'bg-emerald-500'
+                                      : yoastAnalysis.overallScore === 'ok'
+                                      ? 'bg-amber-500'
+                                      : 'bg-red-500'
+                                  }`}
+                                  title={`Yoast SEO Score: ${yoastAnalysis.overallScore.toUpperCase()} (${yoastAnalysis.scorePercentage}%)`}
+                                />
+                                <span className="text-[11px] font-mono text-slate-600">
+                                  {pg.focusKeyphrase ? (
+                                    <span className="bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200 font-semibold truncate max-w-[120px] inline-block">
+                                      {pg.focusKeyphrase}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400 italic">No Keyphrase</span>
+                                  )}
+                                </span>
+                              </div>
                             </td>
                             <td className="py-3 px-4">
                               <div className="flex items-center gap-1.5 flex-wrap">
@@ -2320,6 +2383,37 @@ export default function AdminDashboard({
                     minHeight="320px"
                   />
 
+                  {/* YOAST SEO EMBEDDED METABOX FOR BLOG POSTS */}
+                  <div className="pt-2">
+                    <YoastSeoPanel
+                      title={editingPost.title}
+                      slug={`blog/${editingPost.slug}`}
+                      contentHtml={editingPost.contentHtml}
+                      siteName="ScribdDownloader"
+                      seoData={{
+                        focusKeyphrase: editingPost.focusKeyphrase,
+                        seoTitle: editingPost.seoTitle,
+                        seoDescription: editingPost.seoDescription,
+                        canonicalUrl: editingPost.canonicalUrl,
+                        robotsIndex: editingPost.robotsIndex,
+                        robotsFollow: editingPost.robotsFollow,
+                        ogTitle: editingPost.ogTitle,
+                        ogDescription: editingPost.ogDescription,
+                        ogImageUrl: editingPost.ogImageUrl,
+                        twitterTitle: editingPost.twitterTitle,
+                        twitterDescription: editingPost.twitterDescription,
+                        schemaPageType: editingPost.schemaPageType || 'Article',
+                        isCornerstone: editingPost.isCornerstone
+                      }}
+                      onChange={(updated) =>
+                        setEditingPost({
+                          ...editingPost,
+                          ...updated
+                        })
+                      }
+                    />
+                  </div>
+
                   <div className="flex justify-end gap-2 pt-2">
                     <button
                       type="button"
@@ -2345,6 +2439,7 @@ export default function AdminDashboard({
                       <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600">
                         <th className="py-2.5 px-4">Title & Slug</th>
                         <th className="py-2.5 px-4">Lang</th>
+                        <th className="py-2.5 px-4">Yoast SEO</th>
                         <th className="py-2.5 px-4">Polylang Translations</th>
                         <th className="py-2.5 px-4">Date</th>
                         <th className="py-2.5 px-4 text-right">Actions</th>
@@ -2353,6 +2448,13 @@ export default function AdminDashboard({
                     <tbody className="divide-y divide-slate-200 text-xs">
                       {cms.blogPosts.map((post) => {
                         const langObj = cms.languages.find((l) => l.code === post.lang);
+                        const yoastAnalysis = computeYoastSeoAnalysis(
+                          post.title,
+                          post.slug,
+                          post.contentHtml,
+                          post
+                        );
+
                         return (
                           <tr key={post.id} className="hover:bg-slate-50">
                             <td className="py-3 px-4">
@@ -2363,6 +2465,29 @@ export default function AdminDashboard({
                             </td>
                             <td className="py-3 px-4 whitespace-nowrap">
                               {langObj?.flag} {post.lang.toUpperCase()}
+                            </td>
+                            <td className="py-3 px-4 whitespace-nowrap">
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                                    yoastAnalysis.overallScore === 'good'
+                                      ? 'bg-emerald-500'
+                                      : yoastAnalysis.overallScore === 'ok'
+                                      ? 'bg-amber-500'
+                                      : 'bg-red-500'
+                                  }`}
+                                  title={`Yoast SEO Score: ${yoastAnalysis.overallScore.toUpperCase()} (${yoastAnalysis.scorePercentage}%)`}
+                                />
+                                <span className="text-[11px] font-mono text-slate-600">
+                                  {post.focusKeyphrase ? (
+                                    <span className="bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200 font-semibold truncate max-w-[120px] inline-block">
+                                      {post.focusKeyphrase}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400 italic">No Keyphrase</span>
+                                  )}
+                                </span>
+                              </div>
                             </td>
                             <td className="py-3 px-4">
                               <div className="flex items-center gap-1.5 flex-wrap">
@@ -2853,94 +2978,92 @@ export default function AdminDashboard({
           </div>
         )}
 
-        {/* 6. SEO SETTINGS */}
+        {/* 6. YOAST SEO SETTINGS SUITE */}
         {section === 'seo' && (
-          <div className="space-y-6 max-w-4xl">
-            <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-5">
-              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200">
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900 font-display">
-                    SEO Settings, OpenGraph & Schema.org JSON-LD ({editingLang.toUpperCase()})
-                  </h2>
-                  <p className="text-xs text-slate-600 mt-1">
-                    Configure per-language meta titles, descriptions, canonical URLs, robots directives, and structured JSON-LD schema.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => triggerSavedToast('SEO & Schema settings saved!')}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Save SEO Config</span>
-                </button>
+          <div className="space-y-6 max-w-5xl">
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl p-5">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 font-display flex items-center gap-2">
+                  <span className="w-6 h-6 rounded bg-[#5c2d91] text-amber-300 font-serif font-bold flex items-center justify-center text-sm">
+                    Y
+                  </span>
+                  <span>Yoast SEO Global Site & Homepage Suite ({editingLang.toUpperCase()})</span>
+                </h2>
+                <p className="text-xs text-slate-600 mt-1">
+                  Configure search engine optimization, Google SERP snippets, focus keyphrases, and social share cards for the Homepage in {editingLang.toUpperCase()}.
+                </p>
               </div>
+              <button
+                type="button"
+                onClick={() => triggerSavedToast('Yoast SEO settings saved successfully!')}
+                className="px-5 py-2.5 bg-[#5c2d91] hover:bg-[#4b2377] text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Save Yoast SEO Config</span>
+              </button>
+            </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="md:col-span-2">
-                  <label className="text-xs font-semibold text-slate-700 block mb-1">
-                    Document Title (<code className="font-mono">&lt;title&gt;</code>)
-                  </label>
-                  <input
-                    type="text"
-                    value={currentSeo.siteTitle}
-                    onChange={(e) => handleSeoChange('siteTitle', e.target.value)}
-                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg"
-                  />
-                </div>
+            <YoastSeoPanel
+              title={currentSeo.siteTitle}
+              slug=""
+              contentHtml="Scribd Downloader - Free online document downloader and multi-page preview tool with high-resolution page extraction and PDF conversion."
+              siteName={cms.readingAndLayout?.brandLogoText || 'ScribdDownloader'}
+              baseUrl="https://scribddownloader.org"
+              isGlobalSiteConfig={true}
+              seoData={{
+                focusKeyphrase: currentSeo.focusKeyphrase || currentSeo.metaKeywords,
+                seoTitle: currentSeo.siteTitle,
+                seoDescription: currentSeo.metaDescription,
+                canonicalUrl: currentSeo.canonicalUrl,
+                robotsIndex: currentSeo.robotsMeta?.includes('noindex') ? 'noindex' : 'index',
+                robotsFollow: currentSeo.robotsMeta?.includes('nofollow') ? 'nofollow' : 'follow',
+                ogTitle: currentSeo.ogTitle,
+                ogDescription: currentSeo.ogDescription,
+                ogImageUrl: currentSeo.ogImageUrl,
+                twitterTitle: currentSeo.twitterTitle,
+                twitterDescription: currentSeo.twitterDescription,
+                schemaPageType: 'WebApplication',
+                isCornerstone: currentSeo.isCornerstone
+              }}
+              onChange={(updated) => {
+                const langSeo = cms.seo[editingLang] || cms.seo.en;
+                const nextRobots = `${updated.robotsIndex || 'index'}, ${updated.robotsFollow || 'follow'}`;
+                const nextSeo: SeoLanguageConfig = {
+                  ...langSeo,
+                  siteTitle: updated.seoTitle || langSeo.siteTitle,
+                  metaDescription: updated.seoDescription || langSeo.metaDescription,
+                  focusKeyphrase: updated.focusKeyphrase,
+                  metaKeywords: updated.focusKeyphrase || langSeo.metaKeywords,
+                  canonicalUrl: updated.canonicalUrl || langSeo.canonicalUrl,
+                  robotsMeta: nextRobots,
+                  ogTitle: updated.ogTitle || langSeo.ogTitle,
+                  ogDescription: updated.ogDescription || langSeo.ogDescription,
+                  ogImageUrl: updated.ogImageUrl || langSeo.ogImageUrl,
+                  twitterTitle: updated.twitterTitle || langSeo.twitterTitle,
+                  twitterDescription: updated.twitterDescription || langSeo.twitterDescription,
+                  isCornerstone: updated.isCornerstone
+                };
+                onUpdateCms({
+                  ...cms,
+                  seo: {
+                    ...cms.seo,
+                    [editingLang]: nextSeo
+                  }
+                });
+              }}
+            />
 
-                <div className="md:col-span-2">
-                  <label className="text-xs font-semibold text-slate-700 block mb-1">
-                    Meta Description (<code className="font-mono">meta[name="description"]</code>)
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={currentSeo.metaDescription}
-                    onChange={(e) => handleSeoChange('metaDescription', e.target.value)}
-                    className="w-full p-2.5 text-xs bg-slate-50 border border-slate-300 rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 block mb-1">
-                    Focus Keywords
-                  </label>
-                  <input
-                    type="text"
-                    value={currentSeo.metaKeywords}
-                    onChange={(e) => handleSeoChange('metaKeywords', e.target.value)}
-                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 block mb-1">
-                    Robots Meta Directive
-                  </label>
-                  <select
-                    value={currentSeo.robotsMeta}
-                    onChange={(e) => handleSeoChange('robotsMeta', e.target.value)}
-                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg"
-                  >
-                    <option value="index, follow">index, follow</option>
-                    <option value="noindex, follow">noindex, follow</option>
-                    <option value="index, nofollow">index, nofollow</option>
-                    <option value="noindex, nofollow">noindex, nofollow</option>
-                  </select>
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="text-xs font-semibold text-slate-700 block mb-1">
-                    Schema.org Structured Data (JSON-LD)
-                  </label>
-                  <textarea
-                    rows={6}
-                    value={currentSeo.schemaJsonLd}
-                    onChange={(e) => handleSeoChange('schemaJsonLd', e.target.value)}
-                    className="w-full p-3 text-xs font-mono bg-slate-900 text-slate-100 border border-slate-700 rounded-lg"
-                  />
-                </div>
-              </div>
+            {/* Custom Schema.org JSON-LD Editor */}
+            <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-3">
+              <label className="text-xs font-bold text-slate-900 block font-mono uppercase">
+                Custom Schema.org Structured Data (JSON-LD)
+              </label>
+              <textarea
+                rows={6}
+                value={currentSeo.schemaJsonLd}
+                onChange={(e) => handleSeoChange('schemaJsonLd', e.target.value)}
+                className="w-full p-3 text-xs font-mono bg-slate-900 text-slate-100 border border-slate-700 rounded-lg"
+              />
             </div>
           </div>
         )}

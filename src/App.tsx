@@ -21,6 +21,12 @@ import {
   Calendar,
   User,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ZoomIn,
+  ZoomOut,
+  Play,
+  Pause,
   Mail,
   Menu,
   X
@@ -54,7 +60,7 @@ import {
 import AdminDashboard from './components/AdminDashboard';
 import AdminLogin from './components/AdminLogin';
 
-type ViewerTab = 'original-embed' | 'page-grid' | 'pdf-preview';
+type ViewerTab = 'original-embed' | 'page-slider' | 'page-grid' | 'pdf-preview';
 type RelayNode = 'auto' | 'direct-proxy' | 'allorigins' | 'codetabs' | 'corsproxy';
 type ActiveRoute =
   | { view: 'home' }
@@ -269,10 +275,37 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [currentDoc, setCurrentDoc] = useState<ScribdDocumentData | null>(null);
-  const [viewerTab, setViewerTab] = useState<ViewerTab>('original-embed');
+  const [viewerTab, setViewerTab] = useState<ViewerTab>('page-slider');
+  const [activeSlidePage, setActiveSlidePage] = useState<number>(1);
+  const [sliderZoom, setSliderZoom] = useState<number>(100);
+  const [isAutoPlayingSlides, setIsAutoPlayingSlides] = useState<boolean>(false);
   const [compiledPdfBlobUrl, setCompiledPdfBlobUrl] = useState<string | null>(null);
   const [compiledPdfSizeKb, setCompiledPdfSizeKb] = useState<number | null>(null);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
+
+  // Auto-play page slideshow if enabled
+  useEffect(() => {
+    if (!isAutoPlayingSlides || !currentDoc || currentDoc.pages.length <= 1) return;
+    const interval = setInterval(() => {
+      setActiveSlidePage((prev) => (prev >= currentDoc.pages.length ? 1 : prev + 1));
+    }, 2800);
+    return () => clearInterval(interval);
+  }, [isAutoPlayingSlides, currentDoc]);
+
+  // Keyboard left/right arrow navigation for slider
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!currentDoc || currentDoc.pages.length <= 1) return;
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+      if (e.key === 'ArrowLeft') {
+        setActiveSlidePage((prev) => Math.max(1, prev - 1));
+      } else if (e.key === 'ArrowRight') {
+        setActiveSlidePage((prev) => Math.min(currentDoc.pages.length, prev + 1));
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [currentDoc]);
 
   const handleUpdateCms = (next: CmsStoreState) => {
     setCms(next);
@@ -540,6 +573,7 @@ export default function App() {
     setAllPagesReady(false);
     setFetchDurationMs(null);
     setScanProgress(null);
+    setActiveSlidePage(1);
 
     if (!raw) {
       setErrorMsg('Please paste a valid Scribd document link or ID first.');
@@ -1368,25 +1402,180 @@ export default function App() {
                       />
                     </div>
 
-                    <div className="pt-1">
-                      <div className="text-[11px] text-slate-500 mb-1.5 font-medium">
-                        Detected Page Numbers (1 to {currentDoc.pages.length}):
-                      </div>
-                      <div className="flex items-center gap-1.5 flex-wrap max-h-28 overflow-y-auto p-1">
-                        {currentDoc.pages.map((p) => (
+                    {/* INTERACTIVE PAGE PREVIEW SLIDER (REPLACES PAGE NUMBERS LIST) */}
+                    <div className="pt-2 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 pb-1 border-b border-slate-200/80">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                          <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                            Page Preview Slider
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-blue-100 text-blue-900 border border-blue-200">
+                            Page {activeSlidePage} of {currentDoc.pages.length}
+                          </span>
+                        </div>
+
+                        {/* Prev / Next & Slider Controls */}
+                        <div className="flex items-center gap-1.5">
                           <button
-                            key={p.pageNumber}
+                            type="button"
+                            disabled={activeSlidePage <= 1}
+                            onClick={() => setActiveSlidePage((prev) => Math.max(1, prev - 1))}
+                            className="p-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 disabled:opacity-30 text-slate-700 cursor-pointer transition-colors"
+                            title="Previous Page (←)"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={activeSlidePage >= currentDoc.pages.length}
+                            onClick={() => setActiveSlidePage((prev) => Math.min(currentDoc.pages.length, prev + 1))}
+                            className="p-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 disabled:opacity-30 text-slate-700 cursor-pointer transition-colors"
+                            title="Next Page (→)"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+
+                          <button
                             type="button"
                             onClick={() => {
-                              setViewerTab('page-grid');
-                              const el = document.getElementById(`detected-page-${p.pageNumber}`);
-                              el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                              setViewerTab('page-slider');
+                              const el = document.getElementById('viewer');
+                              el?.scrollIntoView({ behavior: 'smooth' });
                             }}
-                            className="px-2 py-1 text-[11px] font-mono tabular-nums rounded border bg-emerald-50 border-emerald-300 text-emerald-900 font-semibold hover:bg-emerald-100 transition-colors cursor-pointer"
+                            className="px-2.5 py-1 text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white rounded-lg flex items-center gap-1 cursor-pointer transition-colors ml-1"
                           >
-                            Page {p.pageNumber}
+                            <Maximize2 className="w-3 h-3" />
+                            <span>Open Full Slider</span>
                           </button>
-                        ))}
+                        </div>
+                      </div>
+
+                      {/* Interactive Drag & Scrub Range Slider */}
+                      <div className="space-y-1 bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
+                        <div className="flex items-center justify-between text-[11px] font-mono text-slate-500">
+                          <span>Page 1</span>
+                          <span className="font-bold text-blue-600">
+                            Drag Slider to View Any Page ({activeSlidePage} / {currentDoc.pages.length})
+                          </span>
+                          <span>Page {currentDoc.pages.length}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={1}
+                          max={currentDoc.pages.length}
+                          value={activeSlidePage}
+                          onChange={(e) => setActiveSlidePage(Number(e.target.value))}
+                          className="w-full accent-blue-600 cursor-pointer h-2 bg-slate-200 rounded-lg appearance-none"
+                        />
+                      </div>
+
+                      {/* Active Page Large Preview Stage with Overlay Nav Arrows */}
+                      {currentDoc.pages[activeSlidePage - 1] && (() => {
+                        const activePage = currentDoc.pages[activeSlidePage - 1];
+                        return (
+                          <div className="relative bg-slate-900/95 rounded-xl overflow-hidden border border-slate-300 p-3 sm:p-4 flex flex-col items-center justify-center min-h-[340px] max-h-[460px] shadow-inner">
+                            {/* Floating Left Arrow */}
+                            <button
+                              type="button"
+                              disabled={activeSlidePage <= 1}
+                              onClick={() => setActiveSlidePage((prev) => Math.max(1, prev - 1))}
+                              className="absolute left-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center disabled:opacity-20 shadow-lg cursor-pointer backdrop-blur-xs transition-transform hover:scale-105"
+                              title="Previous Page (←)"
+                            >
+                              <ChevronLeft className="w-5 h-5" />
+                            </button>
+
+                            {/* Floating Right Arrow */}
+                            <button
+                              type="button"
+                              disabled={activeSlidePage >= currentDoc.pages.length}
+                              onClick={() => setActiveSlidePage((prev) => Math.min(currentDoc.pages.length, prev + 1))}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center disabled:opacity-20 shadow-lg cursor-pointer backdrop-blur-xs transition-transform hover:scale-105"
+                              title="Next Page (→)"
+                            >
+                              <ChevronRight className="w-5 h-5" />
+                            </button>
+
+                            {/* Active Page Image Scan or Extracted Text */}
+                            {activePage.imageUrl ? (
+                              <div className="max-h-[380px] overflow-hidden flex items-center justify-center">
+                                <img
+                                  src={`https://wsrv.nl/?url=${encodeURIComponent(activePage.imageUrl)}&output=jpg`}
+                                  alt={`Preview of Page ${activePage.pageNumber}`}
+                                  className="max-h-[380px] w-auto object-contain rounded border border-white/20 shadow-2xl transition-transform"
+                                />
+                              </div>
+                            ) : (
+                              <div className="bg-white rounded-lg p-6 max-w-lg w-full text-slate-800 shadow-md space-y-2 text-xs leading-relaxed max-h-[360px] overflow-y-auto">
+                                <div className="font-mono font-bold text-slate-400 pb-1 border-b border-slate-100 flex items-center justify-between">
+                                  <span>Page {activePage.pageNumber} — Extracted Content Preview</span>
+                                  <span className="text-emerald-600 font-normal">Vector Text Verified</span>
+                                </div>
+                                <div className="whitespace-pre-wrap">{activePage.text}</div>
+                              </div>
+                            )}
+
+                            {/* Bottom Caption Bar */}
+                            <div className="mt-2.5 px-3 py-1 bg-black/70 backdrop-blur-md rounded-full text-[11px] font-mono text-white flex items-center gap-2">
+                              <span>Page {activePage.pageNumber} of {currentDoc.pages.length}</span>
+                              <span className="text-emerald-400">
+                                · {activePage.imageUrl ? 'High-Res Page Scan Verified' : 'Vector Content Verified'}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Horizontal Thumbnail Scrubber Filmstrip (Visual Page Previews instead of plain text numbers) */}
+                      <div className="space-y-1.5 pt-1">
+                        <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
+                          <span>Visual Page Thumbnails (Click any page preview to slide):</span>
+                          <span className="font-mono text-slate-400">Total {currentDoc.pages.length} Previews</span>
+                        </div>
+                        <div className="flex items-center gap-2 overflow-x-auto pb-2 pt-1 px-1 scrollbar-thin">
+                          {currentDoc.pages.map((p) => {
+                            const isCurrent = p.pageNumber === activeSlidePage;
+                            return (
+                              <button
+                                key={p.pageNumber}
+                                type="button"
+                                onClick={() => setActiveSlidePage(p.pageNumber)}
+                                className={`group shrink-0 relative rounded-lg overflow-hidden border-2 transition-all cursor-pointer ${
+                                  isCurrent
+                                    ? 'border-blue-600 ring-2 ring-blue-400 scale-105 shadow-md z-10'
+                                    : 'border-slate-200 hover:border-slate-400 opacity-80 hover:opacity-100'
+                                }`}
+                                style={{ width: '68px', height: '92px' }}
+                                title={`Slide to Page ${p.pageNumber}`}
+                              >
+                                {p.imageUrl ? (
+                                  <img
+                                    src={`https://wsrv.nl/?url=${encodeURIComponent(p.imageUrl)}&w=140&output=jpg`}
+                                    alt={`Thumb ${p.pageNumber}`}
+                                    className="w-full h-full object-cover bg-white"
+                                    loading="lazy"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full bg-slate-100 flex flex-col items-center justify-center p-1 text-center">
+                                    <FileText className="w-5 h-5 text-slate-400" />
+                                    <span className="text-[9px] font-mono text-slate-500 mt-1 line-clamp-2">
+                                      P.{p.pageNumber}
+                                    </span>
+                                  </div>
+                                )}
+                                <div
+                                  className={`absolute bottom-0 inset-x-0 text-center py-0.5 text-[10px] font-mono font-bold ${
+                                    isCurrent ? 'bg-blue-600 text-white' : 'bg-black/60 text-white'
+                                  }`}
+                                >
+                                  P.{p.pageNumber}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1538,6 +1727,19 @@ export default function App() {
                       <div className="flex items-center gap-1 p-1 bg-slate-200/80 rounded-lg">
                         <button
                           type="button"
+                          onClick={() => setViewerTab('page-slider')}
+                          className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer flex items-center gap-1.5 ${
+                            viewerTab === 'page-slider'
+                              ? 'bg-white text-slate-900 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          <Sliders className="w-3.5 h-3.5 text-blue-600" />
+                          <span>Page Preview Slider</span>
+                        </button>
+
+                        <button
+                          type="button"
                           onClick={() => setViewerTab('original-embed')}
                           className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer flex items-center gap-1.5 ${
                             viewerTab === 'original-embed'
@@ -1559,7 +1761,7 @@ export default function App() {
                           }`}
                         >
                           <Layers className="w-3.5 h-3.5" />
-                          <span>Detected Pages List (1 to {currentDoc.pages.length})</span>
+                          <span>All Pages Grid ({currentDoc.pages.length})</span>
                         </button>
 
                         {compiledPdfBlobUrl && (
@@ -1573,15 +1775,213 @@ export default function App() {
                             }`}
                           >
                             <FileText className="w-3.5 h-3.5" />
-                            <span>Downloaded PDF File Preview</span>
+                            <span>Downloaded PDF Preview</span>
                           </button>
                         )}
                       </div>
 
                       <span className="text-xs text-slate-500 font-mono tabular-nums">
-                        Showing Pages 1–{currentDoc.pages.length}
+                        Active Slide: Page {activeSlidePage} of {currentDoc.pages.length}
                       </span>
                     </div>
+
+                    {viewerTab === 'page-slider' && (
+                      <div className="p-4 sm:p-6 bg-slate-950 text-white min-h-[660px] flex flex-col justify-between space-y-4">
+                        {/* Slider Controls Bar */}
+                        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/90 p-3 rounded-xl border border-slate-800">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-bold text-emerald-400">
+                              PAGE {activeSlidePage} / {currentDoc.pages.length}
+                            </span>
+                            <span className="text-slate-600">|</span>
+                            <span className="text-xs text-slate-300">
+                              {currentDoc.pages[activeSlidePage - 1]?.imageUrl
+                                ? 'High-Definition Page Scan'
+                                : 'Extracted Text Stream'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {/* Autoplay Slideshow Toggle */}
+                            <button
+                              type="button"
+                              onClick={() => setIsAutoPlayingSlides((p) => !p)}
+                              className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors ${
+                                isAutoPlayingSlides
+                                  ? 'bg-amber-500 text-slate-950'
+                                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                              }`}
+                              title={isAutoPlayingSlides ? 'Pause Autoplay' : 'Play Slideshow'}
+                            >
+                              {isAutoPlayingSlides ? (
+                                <>
+                                  <Pause className="w-3 h-3" />
+                                  <span>Pause Slides</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="w-3 h-3" />
+                                  <span>Autoplay</span>
+                                </>
+                              )}
+                            </button>
+
+                            {/* Zoom Out / Zoom In */}
+                            <div className="flex items-center gap-1 bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-xs">
+                              <button
+                                type="button"
+                                onClick={() => setSliderZoom((z) => Math.max(60, z - 15))}
+                                className="p-1 hover:text-white text-slate-400 cursor-pointer"
+                                title="Zoom Out"
+                              >
+                                <ZoomOut className="w-3.5 h-3.5" />
+                              </button>
+                              <span className="font-mono text-[11px] tabular-nums px-1 text-slate-300">
+                                {sliderZoom}%
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setSliderZoom((z) => Math.min(200, z + 15))}
+                                className="p-1 hover:text-white text-slate-400 cursor-pointer"
+                                title="Zoom In"
+                              >
+                                <ZoomIn className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+
+                            {/* Prev / Next buttons */}
+                            <button
+                              type="button"
+                              disabled={activeSlidePage <= 1}
+                              onClick={() => setActiveSlidePage((p) => Math.max(1, p - 1))}
+                              className="px-3 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 rounded text-xs font-semibold cursor-pointer flex items-center gap-1"
+                              title="Previous Page (←)"
+                            >
+                              <ChevronLeft className="w-3.5 h-3.5" />
+                              <span>Prev</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={activeSlidePage >= currentDoc.pages.length}
+                              onClick={() => setActiveSlidePage((p) => Math.min(currentDoc.pages.length, p + 1))}
+                              className="px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-30 rounded text-xs font-semibold cursor-pointer flex items-center gap-1"
+                              title="Next Page (→)"
+                            >
+                              <span>Next</span>
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Interactive Page Range Scrubber */}
+                        <div className="px-1">
+                          <input
+                            type="range"
+                            min={1}
+                            max={currentDoc.pages.length}
+                            value={activeSlidePage}
+                            onChange={(e) => setActiveSlidePage(Number(e.target.value))}
+                            className="w-full accent-blue-500 cursor-pointer h-2 bg-slate-800 rounded-lg appearance-none"
+                          />
+                        </div>
+
+                        {/* Main Stage Slide View with Overlay Arrows */}
+                        <div className="relative flex-1 flex items-center justify-center min-h-[460px] max-h-[640px] overflow-hidden p-2">
+                          {/* Floating Side Arrow Left */}
+                          <button
+                            type="button"
+                            disabled={activeSlidePage <= 1}
+                            onClick={() => setActiveSlidePage((p) => Math.max(1, p - 1))}
+                            className="absolute left-2 z-20 w-11 h-11 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center disabled:opacity-20 shadow-xl cursor-pointer backdrop-blur-xs transition-transform hover:scale-110"
+                            title="Previous Page (←)"
+                          >
+                            <ChevronLeft className="w-7 h-7" />
+                          </button>
+
+                          {/* Floating Side Arrow Right */}
+                          <button
+                            type="button"
+                            disabled={activeSlidePage >= currentDoc.pages.length}
+                            onClick={() => setActiveSlidePage((p) => Math.min(currentDoc.pages.length, p + 1))}
+                            className="absolute right-2 z-20 w-11 h-11 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center disabled:opacity-20 shadow-xl cursor-pointer backdrop-blur-xs transition-transform hover:scale-110"
+                            title="Next Page (→)"
+                          >
+                            <ChevronRight className="w-7 h-7" />
+                          </button>
+
+                          {currentDoc.pages[activeSlidePage - 1] && (() => {
+                            const slide = currentDoc.pages[activeSlidePage - 1];
+                            return (
+                              <div
+                                className="flex items-center justify-center transition-transform duration-200"
+                                style={{ transform: `scale(${sliderZoom / 100})` }}
+                              >
+                                {slide.imageUrl ? (
+                                  <img
+                                    src={`https://wsrv.nl/?url=${encodeURIComponent(slide.imageUrl)}&output=jpg`}
+                                    alt={`Page ${slide.pageNumber}`}
+                                    className="max-h-[520px] w-auto object-contain rounded shadow-2xl border border-slate-700 bg-white"
+                                  />
+                                ) : (
+                                  <div className="bg-white text-slate-900 rounded-xl p-8 max-w-2xl max-h-[500px] overflow-y-auto shadow-2xl space-y-4">
+                                    <div className="flex items-center justify-between border-b pb-2 font-mono text-xs text-slate-500">
+                                      <span>PAGE {slide.pageNumber} OF {currentDoc.pages.length}</span>
+                                      <span className="text-blue-600 font-semibold">Extracted Text</span>
+                                    </div>
+                                    <div className="text-sm whitespace-pre-wrap leading-relaxed">
+                                      {slide.text}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+
+                        {/* Bottom Thumbnail Strip */}
+                        <div className="flex items-center gap-2 overflow-x-auto p-2 bg-slate-900/90 rounded-xl border border-slate-800 scrollbar-thin">
+                          {currentDoc.pages.map((p) => {
+                            const isCurrent = p.pageNumber === activeSlidePage;
+                            return (
+                              <button
+                                key={p.pageNumber}
+                                type="button"
+                                onClick={() => setActiveSlidePage(p.pageNumber)}
+                                className={`shrink-0 relative rounded-lg overflow-hidden border-2 transition-all cursor-pointer ${
+                                  isCurrent
+                                    ? 'border-blue-500 ring-2 ring-blue-400 scale-105 z-10 shadow-lg'
+                                    : 'border-slate-700 opacity-60 hover:opacity-100 hover:border-slate-500'
+                                }`}
+                                style={{ width: '64px', height: '86px' }}
+                              >
+                                {p.imageUrl ? (
+                                  <img
+                                    src={`https://wsrv.nl/?url=${encodeURIComponent(p.imageUrl)}&w=120&output=jpg`}
+                                    alt={`Thumb ${p.pageNumber}`}
+                                    className="w-full h-full object-cover bg-white"
+                                    loading="lazy"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full bg-slate-800 flex flex-col items-center justify-center p-1 text-center">
+                                    <FileText className="w-4 h-4 text-slate-400" />
+                                    <span className="text-[9px] font-mono text-slate-300 mt-1">
+                                      P.{p.pageNumber}
+                                    </span>
+                                  </div>
+                                )}
+                                <div
+                                  className={`absolute bottom-0 inset-x-0 text-center py-0.5 text-[10px] font-mono font-bold ${
+                                    isCurrent ? 'bg-blue-600 text-white' : 'bg-black/70 text-slate-300'
+                                  }`}
+                                >
+                                  P.{p.pageNumber}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
 
                     {viewerTab === 'original-embed' && (
                       <div className="w-full h-[740px] bg-slate-200">

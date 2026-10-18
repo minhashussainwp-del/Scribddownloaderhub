@@ -59,7 +59,302 @@ export interface AdSlotConfig {
     | 'custom-shortcode';
 }
 
-export interface BlogPostItem {
+export interface YoastItemSeoFields {
+  focusKeyphrase?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  canonicalUrl?: string;
+  robotsIndex?: 'index' | 'noindex';
+  robotsFollow?: 'follow' | 'nofollow';
+  ogTitle?: string;
+  ogDescription?: string;
+  ogImageUrl?: string;
+  twitterTitle?: string;
+  twitterDescription?: string;
+  schemaPageType?: 'WebPage' | 'Article' | 'FAQPage' | 'AboutPage' | 'ContactPage' | 'WebApplication';
+  isCornerstone?: boolean;
+}
+
+export interface YoastSeoCheckResult {
+  id: string;
+  label: string;
+  status: 'good' | 'ok' | 'bad';
+  detail: string;
+}
+
+export interface YoastSeoAnalysis {
+  overallScore: 'good' | 'ok' | 'bad';
+  scorePercentage: number;
+  readabilityScore: 'good' | 'ok' | 'bad';
+  checks: YoastSeoCheckResult[];
+  readabilityChecks: YoastSeoCheckResult[];
+}
+
+export function computeYoastSeoAnalysis(
+  title: string,
+  slug: string,
+  contentHtml: string,
+  yoast?: YoastItemSeoFields
+): YoastSeoAnalysis {
+  const keyword = (yoast?.focusKeyphrase || '').trim().toLowerCase();
+  const effectiveTitle = (yoast?.seoTitle || title || '').trim();
+  const effectiveDesc = (yoast?.seoDescription || '').trim();
+  const plainText = (contentHtml || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  const words = plainText ? plainText.split(/\s+/).filter(Boolean) : [];
+  const wordCount = words.length;
+
+  const checks: YoastSeoCheckResult[] = [];
+
+  // 1. Focus Keyphrase existence
+  if (!keyword) {
+    checks.push({
+      id: 'focus-keyword-set',
+      label: 'Focus Keyphrase',
+      status: 'bad',
+      detail: 'No focus keyphrase was set. Setting a keyphrase helps optimize search rankings.'
+    });
+  } else {
+    checks.push({
+      id: 'focus-keyword-set',
+      label: 'Focus Keyphrase',
+      status: 'good',
+      detail: `Focus keyphrase is set to "${keyword}".`
+    });
+
+    // 2. Keyphrase in SEO Title
+    if (effectiveTitle.toLowerCase().includes(keyword)) {
+      checks.push({
+        id: 'keyword-in-title',
+        label: 'Keyphrase in SEO Title',
+        status: 'good',
+        detail: 'The focus keyphrase appears in the SEO title.'
+      });
+    } else {
+      checks.push({
+        id: 'keyword-in-title',
+        label: 'Keyphrase in SEO Title',
+        status: 'bad',
+        detail: 'The focus keyphrase does not appear in the SEO title.'
+      });
+    }
+
+    // 3. Keyphrase in Meta Description
+    if (effectiveDesc.toLowerCase().includes(keyword)) {
+      checks.push({
+        id: 'keyword-in-desc',
+        label: 'Keyphrase in Meta Description',
+        status: 'good',
+        detail: 'The meta description contains the focus keyphrase.'
+      });
+    } else {
+      checks.push({
+        id: 'keyword-in-desc',
+        label: 'Keyphrase in Meta Description',
+        status: 'ok',
+        detail: 'The meta description does not contain the keyphrase. Consider including it to boost click-through rate.'
+      });
+    }
+
+    // 4. Keyphrase in URL Slug
+    const cleanSlug = (slug || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanKey = keyword.replace(/[^a-z0-9]/g, '');
+    if (cleanKey && cleanSlug.includes(cleanKey)) {
+      checks.push({
+        id: 'keyword-in-slug',
+        label: 'Keyphrase in Slug',
+        status: 'good',
+        detail: 'Keyphrase appears in the URL slug.'
+      });
+    } else {
+      checks.push({
+        id: 'keyword-in-slug',
+        label: 'Keyphrase in Slug',
+        status: 'ok',
+        detail: 'Keyphrase is not in the URL slug.'
+      });
+    }
+
+    // 5. Keyphrase Density in Content
+    const keywordMatches = plainText
+      ? (plainText.toLowerCase().match(new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length
+      : 0;
+    const density = wordCount > 0 ? (keywordMatches / wordCount) * 100 : 0;
+    if (keywordMatches >= 2 && density >= 0.5 && density <= 3.5) {
+      checks.push({
+        id: 'keyword-density',
+        label: 'Keyphrase Density',
+        status: 'good',
+        detail: `The focus keyphrase was found ${keywordMatches} times (${density.toFixed(1)}% density). Great balance!`
+      });
+    } else if (keywordMatches === 1 || density < 0.5) {
+      checks.push({
+        id: 'keyword-density',
+        label: 'Keyphrase Density',
+        status: 'ok',
+        detail: `The focus keyphrase was found ${keywordMatches} time(s). Try using it a bit more often in the content.`
+      });
+    } else {
+      checks.push({
+        id: 'keyword-density',
+        label: 'Keyphrase Density',
+        status: 'bad',
+        detail: 'The focus keyphrase was not found in the text.'
+      });
+    }
+  }
+
+  // 6. SEO Title Length (optimal: 30 - 65 chars)
+  const titleLen = effectiveTitle.length;
+  if (titleLen >= 30 && titleLen <= 65) {
+    checks.push({
+      id: 'title-width',
+      label: 'SEO Title Width',
+      status: 'good',
+      detail: `SEO title is ${titleLen} characters (optimal range: 30–65 characters).`
+    });
+  } else if (titleLen > 65) {
+    checks.push({
+      id: 'title-width',
+      label: 'SEO Title Width',
+      status: 'ok',
+      detail: `SEO title is ${titleLen} characters. It may be truncated in search results.`
+    });
+  } else {
+    checks.push({
+      id: 'title-width',
+      label: 'SEO Title Width',
+      status: 'bad',
+      detail: `SEO title is ${titleLen} characters. It is too short for search snippet visibility.`
+    });
+  }
+
+  // 7. Meta Description Length (optimal: 120 - 160 chars)
+  const descLen = effectiveDesc.length;
+  if (descLen >= 120 && descLen <= 160) {
+    checks.push({
+      id: 'desc-length',
+      label: 'Meta Description Length',
+      status: 'good',
+      detail: `Meta description is ${descLen} characters (optimal range: 120–160 characters).`
+    });
+  } else if (descLen > 160) {
+    checks.push({
+      id: 'desc-length',
+      label: 'Meta Description Length',
+      status: 'ok',
+      detail: `Meta description is ${descLen} characters. Snippets over 160 characters may be truncated.`
+    });
+  } else if (descLen > 0) {
+    checks.push({
+      id: 'desc-length',
+      label: 'Meta Description Length',
+      status: 'ok',
+      detail: `Meta description is ${descLen} characters. Recommended length is between 120 and 160 characters.`
+    });
+  } else {
+    checks.push({
+      id: 'desc-length',
+      label: 'Meta Description Length',
+      status: 'bad',
+      detail: 'No meta description has been specified. Search engines will display copy from the page instead.'
+    });
+  }
+
+  // 8. Text Length
+  if (wordCount >= 300) {
+    checks.push({
+      id: 'text-length',
+      label: 'Text Length',
+      status: 'good',
+      detail: `The text contains ${wordCount} words, which is above the recommended minimum of 300 words.`
+    });
+  } else if (wordCount >= 150) {
+    checks.push({
+      id: 'text-length',
+      label: 'Text Length',
+      status: 'ok',
+      detail: `The text contains ${wordCount} words. Consider adding more valuable content to reach 300+ words.`
+    });
+  } else {
+    checks.push({
+      id: 'text-length',
+      label: 'Text Length',
+      status: 'bad',
+      detail: `The text contains ${wordCount} words. This is below the minimum recommended of 300 words.`
+    });
+  }
+
+  // Readability Checks
+  const readabilityChecks: YoastSeoCheckResult[] = [];
+  const sentences = plainText.split(/[.!?]+/).filter((s) => s.trim().length > 0);
+  const avgWordsPerSentence = sentences.length > 0 ? wordCount / sentences.length : 0;
+
+  if (avgWordsPerSentence <= 20) {
+    readabilityChecks.push({
+      id: 'sentence-length',
+      label: 'Sentence Length',
+      status: 'good',
+      detail: `Average sentence length is ${avgWordsPerSentence.toFixed(1)} words (optimal: 20 words or fewer).`
+    });
+  } else {
+    readabilityChecks.push({
+      id: 'sentence-length',
+      label: 'Sentence Length',
+      status: 'ok',
+      detail: `Average sentence length is ${avgWordsPerSentence.toFixed(1)} words. Try shortening some sentences.`
+    });
+  }
+
+  // Subheadings check
+  const hasHeadings = /<h[2-4][^>]*>/i.test(contentHtml || '');
+  if (hasHeadings || wordCount < 300) {
+    readabilityChecks.push({
+      id: 'subheading-distribution',
+      label: 'Subheading Distribution',
+      status: 'good',
+      detail: 'Your content uses subheadings (H2, H3, H4) to structure the text nicely.'
+    });
+  } else {
+    readabilityChecks.push({
+      id: 'subheading-distribution',
+      label: 'Subheading Distribution',
+      status: 'ok',
+      detail: 'Consider adding subheadings (H2, H3) to break up longer sections of text.'
+    });
+  }
+
+  // Paragraph length check
+  const paragraphs = (contentHtml || '').split(/<\/p>/i).filter((p) => p.trim().length > 0);
+  readabilityChecks.push({
+    id: 'paragraph-length',
+    label: 'Paragraph Length',
+    status: paragraphs.length >= 2 || wordCount < 200 ? 'good' : 'ok',
+    detail: 'Paragraphs are well spaced and readable on mobile screens.'
+  });
+
+  const goodCount = checks.filter((c) => c.status === 'good').length;
+  const okCount = checks.filter((c) => c.status === 'ok').length;
+  const total = checks.length;
+  const scorePercentage = total > 0 ? Math.round(((goodCount * 1 + okCount * 0.5) / total) * 100) : 0;
+
+  let overallScore: 'good' | 'ok' | 'bad' = 'bad';
+  if (scorePercentage >= 75) overallScore = 'good';
+  else if (scorePercentage >= 50) overallScore = 'ok';
+
+  const readGood = readabilityChecks.filter((c) => c.status === 'good').length;
+  const readabilityScore: 'good' | 'ok' | 'bad' =
+    readGood >= 2 ? 'good' : readGood === 1 ? 'ok' : 'bad';
+
+  return {
+    overallScore,
+    scorePercentage,
+    readabilityScore,
+    checks,
+    readabilityChecks
+  };
+}
+
+export interface BlogPostItem extends YoastItemSeoFields {
   id: string;
   slug: string;
   lang: string;
@@ -71,11 +366,9 @@ export interface BlogPostItem {
   author: string;
   publishedAt: string;
   status: 'published' | 'draft';
-  seoTitle?: string;
-  seoDescription?: string;
 }
 
-export interface CustomPageItem {
+export interface CustomPageItem extends YoastItemSeoFields {
   id: string;
   slug: string;
   lang: string;
@@ -86,21 +379,26 @@ export interface CustomPageItem {
   showInHeader: boolean;
   showInFooter: boolean;
   status: 'published' | 'draft';
-  seoTitle?: string;
-  seoDescription?: string;
 }
 
 export interface SeoLanguageConfig {
   siteTitle: string;
   metaDescription: string;
   metaKeywords: string;
+  focusKeyphrase?: string;
+  titleSeparator?: string;
   ogTitle: string;
   ogDescription: string;
   ogImageUrl: string;
+  twitterTitle?: string;
+  twitterDescription?: string;
+  twitterCardType?: 'summary_large_image' | 'summary';
   canonicalUrl: string;
   robotsMeta: string;
+  schemaPageType?: 'WebApplication' | 'WebPage' | 'FAQPage';
   schemaJsonLd: string;
   customHeadHtml: string;
+  isCornerstone?: boolean;
 }
 
 export interface ShortcodeItem {
