@@ -18,7 +18,8 @@ import {
   LogOut,
   Copy,
   Braces,
-  Sliders
+  Sliders,
+  Terminal
 } from 'lucide-react';
 import {
   CmsStoreState,
@@ -41,6 +42,7 @@ import {
 import WordPressEditor from './WordPressEditor';
 import YoastSeoPanel from './YoastSeoPanel';
 import LanguageVariationsSidebar from './LanguageVariationsSidebar';
+import AdminApiAndDocsPanel from './AdminApiAndDocsPanel';
 
 interface AdminDashboardProps {
   cms: CmsStoreState;
@@ -49,6 +51,7 @@ interface AdminDashboardProps {
   onLogoutAdmin: () => void;
   onPreviewBlogPost: (slug: string) => void;
   onPreviewCustomPage: (slug: string) => void;
+  onLoadDocumentInViewer?: (url: string) => void;
 }
 
 type AdminSection =
@@ -59,7 +62,8 @@ type AdminSection =
   | 'pages'
   | 'shortcodes'
   | 'polylang'
-  | 'seo';
+  | 'seo'
+  | 'api-docs';
 
 export default function AdminDashboard({
   cms,
@@ -67,9 +71,10 @@ export default function AdminDashboard({
   onExitAdmin,
   onLogoutAdmin,
   onPreviewBlogPost,
-  onPreviewCustomPage
+  onPreviewCustomPage,
+  onLoadDocumentInViewer
 }: AdminDashboardProps) {
-  const [section, setSection] = useState<AdminSection>('reading');
+  const [section, setSection] = useState<AdminSection>('api-docs');
   const [editingLang, setEditingLang] = useState<string>(cms.activeLanguage || 'en');
   const [savedBanner, setSavedBanner] = useState<string | null>(null);
 
@@ -829,6 +834,7 @@ export default function AdminDashboard({
           <nav className="space-y-1">
             {(
               [
+                { id: 'api-docs', label: 'WP Plugin (.zip), API & Docs', icon: Terminal },
                 { id: 'reading', label: 'Reading, Header & Footer', icon: Sliders },
                 { id: 'homepage', label: 'Homepage & Content Switcher', icon: LayoutGrid },
                 { id: 'pages', label: `Pages & Important Pages (${cms.pages.length})`, icon: FileText },
@@ -2809,8 +2815,60 @@ export default function AdminDashboard({
                   Ad Placements & Custom Ad Code Manager (Add, Edit & Delete Ads)
                 </h2>
                 <p className="text-xs text-slate-600 mt-1">
-                  Add new ad slots, delete existing ad slots, toggle live visibility, and paste Google AdSense, Adsterra, or custom HTML banner scripts.
+                  Add new ad slots, configure Direct Ad Links on the Fetch &amp; Download PDF buttons, toggle live visibility, and paste Google AdSense, Adsterra, or custom HTML banner scripts.
                 </p>
+              </div>
+
+              {/* Direct Button Ads Configuration (Fetch Button & Download PDF Button) */}
+              <div className="p-5 bg-emerald-50/60 border border-emerald-200 rounded-xl space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">
+                      💰 Button Click Ads (Fetch Button &amp; Download PDF Button Direct Ad URLs)
+                    </h3>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      Add a Direct Ad Link / Smartlink URL to open when a visitor clicks <strong>Fetch Document</strong> or <strong>Download PDF</strong>.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Fetch Button Direct Ad URL (Smartlink / Popunder)
+                    </label>
+                    <input
+                      type="url"
+                      value={readingConfig.fetchButtonAdUrl || ''}
+                      onChange={(e) =>
+                        handleUpdateReadingAndLayout(
+                          { fetchButtonAdUrl: e.target.value },
+                          'Fetch Button Ad URL updated!'
+                        )
+                      }
+                      placeholder="https://your-ad-network.com/fetch-smartlink"
+                      className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Download PDF Button Direct Ad URL (Smartlink / Popunder)
+                    </label>
+                    <input
+                      type="url"
+                      value={readingConfig.downloadButtonAdUrl || ''}
+                      onChange={(e) =>
+                        handleUpdateReadingAndLayout(
+                          { downloadButtonAdUrl: e.target.value },
+                          'Download PDF Button Ad URL updated!'
+                        )
+                      }
+                      placeholder="https://your-ad-network.com/download-smartlink"
+                      className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-lg"
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Create / Add New Ad Slot Form */}
@@ -3305,6 +3363,16 @@ export default function AdminDashboard({
               />
             </div>
           </div>
+        )}
+
+        {/* 7. ADMIN-ONLY API & DOCUMENTS VAULT */}
+        {section === 'api-docs' && (
+          <AdminApiAndDocsPanel
+            cms={cms}
+            onUpdateCms={onUpdateCms}
+            onLoadDocumentInViewer={onLoadDocumentInViewer}
+            triggerSavedToast={triggerSavedToast}
+          />
         )}
       </div>
     </div>

@@ -687,6 +687,27 @@ export default function App() {
       setCurrentDoc(finalDoc);
       setAllPagesReady(true);
 
+      // Save to Admin-only Documents Vault
+      const existingVault = cms.adminDocuments || [];
+      if (!existingVault.some((d) => d.docId === finalDoc.id)) {
+        handleUpdateCms({
+          ...cms,
+          adminDocuments: [
+            {
+              id: `doc-rec-${Date.now()}`,
+              docId: finalDoc.id,
+              title: finalDoc.title,
+              pageCount: finalDoc.pages.length,
+              originalUrl: finalDoc.originalUrl,
+              embedUrl: finalDoc.embedUrl,
+              fetchedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+              source: 'web'
+            },
+            ...existingVault
+          ]
+        });
+      }
+
       setTimeout(() => {
         verifiedPages.slice(0, 30).forEach((p) => {
           if (p.imageUrl) {
@@ -842,6 +863,11 @@ export default function App() {
         }}
         onPreviewBlogPost={(slug) => setRoute({ view: 'blog-post', slug })}
         onPreviewCustomPage={(slug) => setRoute({ view: 'custom-page', slug })}
+        onLoadDocumentInViewer={(docUrl) => {
+          setUrlInput(docUrl);
+          setRoute({ view: 'home' });
+          handleFetchDocument(docUrl);
+        }}
       />
     );
   }
@@ -1276,10 +1302,19 @@ export default function App() {
                   </p>
                 </div>
 
-                {/* Primary Input + "Fetch" & "Download PDF" Buttons */}
+                {/* Step 1: ONLY URL Input + Fetch Button Initially */}
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
+                    if (readingAndLayout.fetchButtonAdUrl?.trim()) {
+                      const adLink = document.createElement('a');
+                      adLink.href = readingAndLayout.fetchButtonAdUrl.trim();
+                      adLink.target = '_blank';
+                      adLink.rel = 'noopener noreferrer';
+                      document.body.appendChild(adLink);
+                      adLink.click();
+                      document.body.removeChild(adLink);
+                    }
                     handleFetchDocument();
                   }}
                   className="mt-6 flex flex-col sm:flex-row gap-3"
@@ -1295,7 +1330,7 @@ export default function App() {
                     />
                   </div>
 
-                  {/* Button 1: Fetch */}
+                  {/* Fetch Button (Only Fetch button shown initially) */}
                   <button
                     type="submit"
                     disabled={isFetching || isDownloading}
@@ -1317,48 +1352,6 @@ export default function App() {
                       </>
                     )}
                   </button>
-
-                  {/* Button 2: Direct Multi-Page PDF Compiler */}
-                  <button
-                    type="button"
-                    onClick={handleDownloadPdf}
-                    disabled={!allPagesReady || isFetching || isDownloading}
-                    className="px-6 py-3 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    {isDownloading ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>
-                          {downloadProgress
-                            ? `${t.downloadingBtn} (${downloadProgress.current}/${downloadProgress.total})`
-                            : t.downloadingBtn}
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <Download className="w-4 h-4" />
-                        <span>
-                          {currentDoc && allPagesReady
-                            ? `${t.downloadPdfBtn} (${currentDoc.pages.length} Pages)`
-                            : t.downloadPdfBtn}
-                        </span>
-                      </>
-                    )}
-                  </button>
-
-                  {/* Button 3: Unlocked Viewer Full-Document PDF Export */}
-                  {currentDoc && (
-                    <a
-                      href={currentDoc.embedUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-4 py-3 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center justify-center gap-1.5 cursor-pointer"
-                      title="Open the unlocked multi-page vector stream and press Ctrl+P / Cmd+P → Save as PDF"
-                    >
-                      <Maximize2 className="w-4 h-4" />
-                      <span>Save Full Preview PDF</span>
-                    </a>
-                  )}
                 </form>
 
                 {errorMsg && (
@@ -1368,30 +1361,70 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Full Page Detection Progress Bar & Page Number Counter */}
+                {/* Step 2: Page Count Verification + Document Preview + Download PDF Button */}
                 {(isFetching || allPagesReady) && currentDoc && (
                   <div className="mt-5 p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <div className="flex items-center gap-2 font-semibold text-slate-900">
-                        {allPagesReady ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        ) : (
-                          <RefreshCw className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
-                        )}
-                        <span>
-                          {allPagesReady
-                            ? `All ${currentDoc.pages.length} of ${currentDoc.pages.length} Pages Verified${
-                                fetchDurationMs ? ` in ${(fetchDurationMs / 1000).toFixed(2)}s` : ''
-                              } — Multi-Page PDF Ready`
-                            : `Scanning & Verifying Pages: ${scanProgress?.scanned ?? 0} of ${
-                                scanProgress?.total ?? currentDoc.pages.length
-                              }`}
-                        </span>
+                    <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 font-semibold text-slate-900">
+                          {allPagesReady ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          ) : (
+                            <RefreshCw className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
+                          )}
+                          <span>
+                            {allPagesReady
+                              ? `All ${currentDoc.pages.length} of ${currentDoc.pages.length} Pages Verified${
+                                  fetchDurationMs ? ` in ${(fetchDurationMs / 1000).toFixed(2)}s` : ''
+                                } — Multi-Page PDF Ready`
+                              : `Scanning & Verifying Pages: ${scanProgress?.scanned ?? 0} of ${
+                                  scanProgress?.total ?? currentDoc.pages.length
+                                }`}
+                          </span>
+                        </div>
+                        <div className="font-mono text-slate-600 tabular-nums">
+                          Document ID: #{currentDoc.id} · Total Pages: {currentDoc.pages.length}
+                          {compiledPdfSizeKb ? ` · Size: ${compiledPdfSizeKb.toLocaleString()} KB` : ''}
+                        </div>
                       </div>
 
-                      <div className="font-mono text-slate-600 tabular-nums">
-                        Document ID: #{currentDoc.id} · Total Pages: {currentDoc.pages.length}
-                        {compiledPdfSizeKb ? ` · Size: ${compiledPdfSizeKb.toLocaleString()} KB` : ''}
+                      {/* Download PDF Button (Appears once document is fetched) */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (readingAndLayout.downloadButtonAdUrl?.trim()) {
+                              const adLink = document.createElement('a');
+                              adLink.href = readingAndLayout.downloadButtonAdUrl.trim();
+                              adLink.target = '_blank';
+                              adLink.rel = 'noopener noreferrer';
+                              document.body.appendChild(adLink);
+                              adLink.click();
+                              document.body.removeChild(adLink);
+                            }
+                            handleDownloadPdf();
+                          }}
+                          disabled={!allPagesReady || isFetching || isDownloading}
+                          className="px-5 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                        >
+                          {isDownloading ? (
+                            <>
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                              <span>
+                                {downloadProgress
+                                  ? `${t.downloadingBtn} (${downloadProgress.current}/${downloadProgress.total})`
+                                  : t.downloadingBtn}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Download className="w-4 h-4" />
+                              <span>
+                                {`${t.downloadPdfBtn} (${currentDoc.pages.length} Pages)`}
+                              </span>
+                            </>
+                          )}
+                        </button>
                       </div>
                     </div>
 
@@ -1590,35 +1623,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Quick Example Links & Advanced Anti-IP-Block Toggle */}
-                <div className="mt-4 pt-3.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium text-slate-700">Live Multi-Page Examples:</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const link1 = 'https://www.scribd.com/document/991278283/2026-Grade-12-Investigation-Term-1';
-                        setUrlInput(link1);
-                        handleFetchDocument(link1);
-                      }}
-                      className="text-blue-600 hover:underline font-mono cursor-pointer"
-                    >
-                      scribd.com/document/991278283 (9 Pages)
-                    </button>
-                    <span>·</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const link2 = 'https://www.scribd.com/document/894860339/Document-2';
-                        setUrlInput(link2);
-                        handleFetchDocument(link2);
-                      }}
-                      className="text-blue-600 hover:underline font-mono cursor-pointer"
-                    >
-                      scribd.com/document/894860339 (14 Pages)
-                    </button>
-                  </div>
-                </div>
               </section>
 
               {!isShortcodeEmbed && renderAdSlot('below-downloader-banner')}
@@ -1643,7 +1647,18 @@ export default function App() {
                       <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                         <button
                           type="button"
-                          onClick={handleDownloadPdf}
+                          onClick={() => {
+                            if (readingAndLayout.downloadButtonAdUrl?.trim()) {
+                              const adLink = document.createElement('a');
+                              adLink.href = readingAndLayout.downloadButtonAdUrl.trim();
+                              adLink.target = '_blank';
+                              adLink.rel = 'noopener noreferrer';
+                              document.body.appendChild(adLink);
+                              adLink.click();
+                              document.body.removeChild(adLink);
+                            }
+                            handleDownloadPdf();
+                          }}
                           disabled={!allPagesReady || isDownloading}
                           className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer"
                         >

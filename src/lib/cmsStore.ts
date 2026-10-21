@@ -430,7 +430,78 @@ export interface SiteReadingAndLayoutSettings {
   brandLogoText: string;
   footerTagline: string;
   footerCopyrightText: string;
+  fetchButtonAdUrl?: string;
+  downloadButtonAdUrl?: string;
 }
+
+export interface AdminApiKeyItem {
+  id: string;
+  name: string;
+  key: string;
+  createdAt: string;
+  active: boolean;
+  requestsCount: number;
+}
+
+export interface AdminApiConfig {
+  enabled: boolean;
+  masterApiKey: string;
+  requireApiKey: boolean;
+  rateLimitPerMinute: number;
+  apiKeys: AdminApiKeyItem[];
+}
+
+export interface AdminDocumentRecord {
+  id: string;
+  docId: string;
+  title: string;
+  pageCount: number;
+  originalUrl: string;
+  embedUrl: string;
+  coverImageUrl?: string;
+  fetchedAt: string;
+  source: 'admin' | 'web' | 'api';
+}
+
+export const DEFAULT_API_CONFIG: AdminApiConfig = {
+  enabled: true,
+  masterApiKey: 'sk_admin_scribd_live_9f8e7d6c5b4a3f2e1d0c',
+  requireApiKey: true,
+  rateLimitPerMinute: 120,
+  apiKeys: [
+    {
+      id: 'key-default-1',
+      name: 'Primary Admin Server Key',
+      key: 'sk_admin_primary_7a6b5c4d3e2f1a0b9c8d',
+      createdAt: '2026-10-18',
+      active: true,
+      requestsCount: 14
+    }
+  ]
+};
+
+export const DEFAULT_ADMIN_DOCUMENTS: AdminDocumentRecord[] = [
+  {
+    id: 'doc-rec-1',
+    docId: '991278283',
+    title: '2026 Grade 12 Investigation Term 1 Mathematics',
+    pageCount: 9,
+    originalUrl: 'https://www.scribd.com/document/991278283/2026-Grade-12-Investigation-Term-1',
+    embedUrl: 'https://www.scribd.com/embeds/991278283/content?start_page=1&view_mode=scroll&access_key=key-fFexxf7r1bzEfWu3HKwf',
+    fetchedAt: '2026-10-20 14:22',
+    source: 'admin'
+  },
+  {
+    id: 'doc-rec-2',
+    docId: '894860339',
+    title: 'Technical Engineering Reference & Study Manual',
+    pageCount: 14,
+    originalUrl: 'https://www.scribd.com/document/894860339/Document-2',
+    embedUrl: 'https://www.scribd.com/embeds/894860339/content?start_page=1&view_mode=scroll&access_key=key-fFexxf7r1bzEfWu3HKwf',
+    fetchedAt: '2026-10-20 16:05',
+    source: 'api'
+  }
+];
 
 export interface CmsStoreState {
   activeLanguage: string;
@@ -442,6 +513,8 @@ export interface CmsStoreState {
   shortcodes: ShortcodeItem[];
   seo: Record<string, SeoLanguageConfig>;
   readingAndLayout: SiteReadingAndLayoutSettings;
+  apiConfig?: AdminApiConfig;
+  adminDocuments?: AdminDocumentRecord[];
   seededV4?: boolean;
 }
 
@@ -1903,7 +1976,9 @@ export const DEFAULT_CMS_STATE: CmsStoreState = {
       schemaJsonLd: '',
       customHeadHtml: ''
     }
-  }
+  },
+  apiConfig: DEFAULT_API_CONFIG,
+  adminDocuments: DEFAULT_ADMIN_DOCUMENTS
 };
 
 export function loadCmsState(): CmsStoreState {
@@ -1986,6 +2061,13 @@ export function loadCmsState(): CmsStoreState {
       pages: mergedPages,
       shortcodes: mergedShortcodes,
       readingAndLayout: mergedReadingAndLayout,
+      apiConfig: {
+        ...DEFAULT_API_CONFIG,
+        ...(parsed.apiConfig || {})
+      },
+      adminDocuments: Array.isArray(parsed.adminDocuments)
+        ? parsed.adminDocuments
+        : DEFAULT_ADMIN_DOCUMENTS,
       translations: { ...DEFAULT_CMS_STATE.translations, ...(parsed.translations || {}) },
       seo: { ...DEFAULT_CMS_STATE.seo, ...(parsed.seo || {}) }
     };
