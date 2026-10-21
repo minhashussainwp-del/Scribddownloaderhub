@@ -1,4 +1,5 @@
 import express from 'express';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
@@ -415,6 +416,9 @@ async function startServer() {
       const zipBytes = generateWordPressPluginZip(mergedCfg);
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', 'attachment; filename="scribd-downloader-pro.zip"');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.setHeader('Content-Length', zipBytes.byteLength.toString());
       res.send(Buffer.from(zipBytes));
     } catch (err) {
@@ -425,6 +429,25 @@ async function startServer() {
 
   app.get('/api/admin/download-wp-plugin', handleDownloadWpPlugin);
   app.post('/api/admin/download-wp-plugin', handleDownloadWpPlugin);
+  app.get('/scribd-downloader-pro.zip', handleDownloadWpPlugin);
+
+  // Also pre-generate public/scribd-downloader-pro.zip on disk for static download
+  try {
+    const publicDir = path.join(__dirname, 'public');
+    if (!fs.existsSync(publicDir)) {
+      fs.mkdirSync(publicDir, { recursive: true });
+    }
+    const initialZipBytes = generateWordPressPluginZip({
+      ...DEFAULT_WP_PLUGIN_CONFIG,
+      remoteApiKey: serverApiConfig.masterApiKey
+    });
+    fs.writeFileSync(
+      path.join(publicDir, 'scribd-downloader-pro.zip'),
+      Buffer.from(initialZipBytes)
+    );
+  } catch (e) {
+    // non-fatal
+  }
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

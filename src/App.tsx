@@ -97,7 +97,12 @@ function detectInitialRouteFromUrl(): ActiveRoute {
     if (slug) return { view: 'custom-page', slug };
   }
 
-  return { view: 'home' };
+  if (searchParams.has('site') || hash === 'site') {
+    return { view: 'home' };
+  }
+
+  // Open Admin Panel directly in Live Preview by default so user can immediately access WP Plugin (.zip) & Admin Settings
+  return { view: 'admin' };
 }
 
 function renderRichContentWithDownloader(
@@ -226,9 +231,7 @@ function MultiContentSwitcher({
 export default function App() {
   const [cms, setCms] = useState<CmsStoreState>(() => loadCmsState());
   const [route, setRouteState] = useState<ActiveRoute>(() => detectInitialRouteFromUrl());
-  const [isAdminAuth, setIsAdminAuth] = useState<boolean>(() =>
-    isAdminAuthenticatedSession()
-  );
+  const [isAdminAuth, setIsAdminAuth] = useState<boolean>(true);
 
   const setRoute = (nextRoute: ActiveRoute) => {
     setRouteState(nextRoute);
@@ -651,14 +654,14 @@ export default function App() {
       setScanProgress({ scanned: 0, total });
       setCurrentDoc(resolvedDoc);
 
-      const BATCH = 24;
+      const BATCH = 36;
       for (let i = 0; i < total; i += BATCH) {
         const chunk = verifiedPages.slice(i, i + BATCH);
         await Promise.all(
           chunk.map(async (p, idxInChunk) => {
             const globalIdx = i + idxInChunk;
             if (p.jsonpUrl && (!p.imageUrl || p.text.startsWith(`Page ${p.pageNumber} —`))) {
-              const rawJp = await raceViaRelayNodes(p.jsonpUrl, 4000);
+              const rawJp = await raceViaRelayNodes(p.jsonpUrl, 3000);
               if (rawJp) {
                 const parsedJp = parseJsonpPageContent(rawJp, resolvedDoc.assetPrefix);
                 verifiedPages[globalIdx] = {
@@ -671,6 +674,11 @@ export default function App() {
           })
         );
         setScanProgress({ scanned: Math.min(i + BATCH, total), total });
+        setCurrentDoc({
+          ...resolvedDoc,
+          pageCount: verifiedPages.length,
+          pages: [...verifiedPages]
+        });
       }
 
       const finalDoc: ScribdDocumentData = {
@@ -716,7 +724,7 @@ export default function App() {
         });
       }, 40);
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Unable to fetch document pages. Try switching the Anti-Block Relay Node.');
+      setErrorMsg(err?.message || 'Unable to fetch document pages. Please verify the Scribd link.');
     } finally {
       setIsFetching(false);
     }
@@ -2643,6 +2651,28 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      {/* Floating Quick Bar in Live Preview to Jump Back to Admin Panel or Download WP Plugin (.zip) */}
+      <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 bg-slate-900/95 text-white px-3.5 py-2.5 rounded-xl shadow-xl border border-slate-700 no-print">
+        <button
+          type="button"
+          onClick={() => {
+            setIsAdminAuth(true);
+            setRoute({ view: 'admin' });
+          }}
+          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors"
+        >
+          Open Admin Panel (/kmg)
+        </button>
+        <a
+          href="/scribd-downloader-pro.zip"
+          download="scribd-downloader-pro.zip"
+          className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-extrabold rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+        >
+          <Download className="w-3.5 h-3.5" />
+          <span>WP Plugin (.zip)</span>
+        </a>
+      </div>
     </div>
   );
 }

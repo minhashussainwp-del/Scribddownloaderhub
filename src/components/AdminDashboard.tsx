@@ -808,6 +808,14 @@ export default function AdminDashboard({
                 <span>Public Site</span>
               </button>
             </div>
+
+            <a
+              href="/api/admin/download-wp-plugin?v=3.0.0"
+              download="scribd-downloader-pro.zip"
+              className="w-full px-3 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+            >
+              <span>⬇ Download WP Plugin v3.0 (.zip)</span>
+            </a>
           </div>
 
           {/* Global Editing Language Selector inside Admin (Polylang Switcher) */}

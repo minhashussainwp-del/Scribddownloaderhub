@@ -77,7 +77,7 @@ export const AdminApiAndDocsPanel: React.FC<AdminApiAndDocsPanelProps> = ({
   // WordPress Plugin (.zip) Builder Configuration State
   const [wpConfig, setWpConfig] = useState<WpPluginBuildConfig>(() => ({
     ...DEFAULT_WP_PLUGIN_CONFIG,
-    remoteApiUrl: typeof window !== 'undefined' ? window.location.origin : '',
+    remoteApiUrl: '',
     remoteApiKey: (cms.apiConfig || DEFAULT_API_CONFIG).masterApiKey,
     fetchBtnAdUrl: cms.readingAndLayout?.fetchButtonAdUrl || '',
     downloadBtnAdUrl: cms.readingAndLayout?.downloadButtonAdUrl || ''
@@ -98,7 +98,7 @@ export const AdminApiAndDocsPanel: React.FC<AdminApiAndDocsPanelProps> = ({
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 4000);
-      triggerSavedToast('Downloaded scribd-downloader-pro.zip — Ready to upload in WordPress Plugins!');
+      triggerSavedToast('Downloaded scribd-downloader-pro.zip (v3.0.0 Turbo) — Ready to upload in WordPress!');
     } catch (err) {
       triggerSavedToast('Error generating WordPress plugin zip.');
     }
@@ -454,10 +454,10 @@ print_r($data["document"]);
                   </span>
                 </div>
                 <h3 className="text-xl font-bold font-display">
-                  WordPress Plugin (.zip) — Anti-IP Block + Button Ads + Real Multi-Page PDF
+                  WordPress Plugin v3.0 (.zip) — Ultra-Fast Sub-Second Fetch + Button Ads + Real PDF
                 </h3>
                 <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-                  Download the complete, self-contained WordPress plugin package (<code className="text-emerald-300">scribd-downloader-pro.zip</code>). It features <strong>Multi-Edge Anti-IP Block Relay</strong>, <strong>Real Scribd Page Count &amp; High-Res Extraction</strong>, <strong>Actual PDF Compilation</strong>, <strong>Fetch &amp; Download Button Ads</strong>, and a full <strong>WP Admin Settings Page</strong>.
+                  Download the complete, self-contained WordPress plugin package (<code className="text-emerald-300">scribd-downloader-pro.zip</code> v3.0.0). Features <strong>Sub-Second Direct Turbo Extraction (~0.2s)</strong>, <strong>Inline Cache-Proof Script Delivery</strong>, <strong>Real Scribd Page Count &amp; Preview Slider</strong>, <strong>Actual PDF Compilation</strong>, and <strong>Fetch &amp; Download Button Ads</strong>.
                 </p>
               </div>
 
@@ -468,8 +468,17 @@ print_r($data["document"]);
                   className="px-6 py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm font-extrabold rounded-xl flex items-center gap-2.5 shadow-lg cursor-pointer transition-transform active:scale-95"
                 >
                   <Download className="w-5 h-5" />
-                  <span>Download WordPress Plugin (.zip)</span>
+                  <span>Download WordPress Plugin v3.0 (.zip)</span>
                 </button>
+
+                <a
+                  href="/api/admin/download-wp-plugin?v=3.0.0"
+                  download="scribd-downloader-pro.zip"
+                  className="px-4 py-3.5 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 text-xs font-bold rounded-xl flex items-center gap-2 shadow-sm cursor-pointer transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Direct HTTP Download v3.0 (.zip)</span>
+                </a>
               </div>
             </div>
 
